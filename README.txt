@@ -2,9 +2,10 @@ Link de las instrucciónes
 https://www.notion.so/lizosmusic/Sistema-de-Lista-de-Espera-2f71e7ef3a69802b821dd9763a442bbc#2f71e7ef3a698059bcf9e3f17b3bcbdc
 
 Stack planeado:
-node.js para la API
+node.js para la API. version 22.16.0
 redis para manejar la persistencía de datos
 bullmq para manejar las queues y workers
+docker porque voy a trabajar esto en mi laptop linux y mi escritorio windows
 
 instrucciones para correr el proyecto:
 

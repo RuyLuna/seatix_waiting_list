@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/sqlite');
 const { client } = require('../cache/redis');
+const { ticketQueue } = require('../queue/ticketQueue');
+const { acceptOffer, getOffer } = require('../utils/offers');
 const crypto = require('crypto');
 
 const api_working = async (req, res) => {
@@ -55,10 +57,12 @@ const create_waitlist_entry = async (req, res) => {
     }
     
     // Only add to Redis if SQLite insert was successful
+    // Store as "userId:quantity" to enable quantity-based filtering during ticket release
     const positions = {};
+    const redisValue = `${user_id}:${quantity_wanted}`;
     for (const zone of zones_preferred) {
       const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
-      await client.lPush(queueKey, user_id);
+      await client.lPush(queueKey, redisValue);
       // Get position in this zone's queue (1-based)
       const position = await client.lLen(queueKey);
       positions[zone] = position;
@@ -112,7 +116,8 @@ const get_waitlist_me = async (req, res) => {
         const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
         // Get all users in queue and find this user's position
         const queue = await client.lRange(queueKey, 0, -1);
-        const position = queue.indexOf(userId);
+        // Parse userId from "userId:quantity" format
+        const position = queue.findIndex(entry => entry.split(':')[0] === userId);
         if (position !== -1) {
           // Position is from end (FIFO: first in = last in list), convert to 1-based from front
           positions[zone] = queue.length - position;
@@ -166,9 +171,16 @@ const delete_waitlist_me = async (req, res) => {
     const zonesPreferred = JSON.parse(userEntry.zones_preferred);
     
     // Remove user from ALL zone queues in Redis
+    // Need to remove entries matching userId (format: "userId:quantity")
     for (const zone of zonesPreferred) {
       const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
-      await client.lRem(queueKey, 0, userId); // Remove all occurrences
+      const queue = await client.lRange(queueKey, 0, -1);
+      // Find and remove all entries for this user
+      for (const entry of queue) {
+        if (entry.split(':')[0] === userId) {
+          await client.lRem(queueKey, 0, entry);
+        }
+      }
     }
     
     // Delete user's waitlist entry from SQLite
@@ -217,57 +229,40 @@ const delete_legacy_waitlist = async (req, res) => {
 const release_tickets = async (req, res) => {
   try {
     const { eventId } = req.params;
-    const { zones } = req.body;
+    const { zones, reason = 'cancellation' } = req.body;
 
     if (!zones || typeof zones !== 'object') {
       return res.status(400).json({ error: 'zones object is required (e.g., { "VIP": 5, "General": 10 })' });
     }
 
-    const winners = [];
-
-    // Process each zone
-    for (const [zone, quantity] of Object.entries(zones)) {
-      // Pop users from the Redis zone queue
-      for (let i = 0; i < quantity; i++) {
-        try {
-          const userId = await client.rPop(`waitlist:event:${eventId}:zone:${zone}`);
-          
-          if (userId) {
-            winners.push({
-              user_id: userId,
-              zone: zone,
-              ticket_position: i + 1
-            });
-
-            // Update SQLite to mark user as notified
-            const database = db.getDb();
-            await new Promise((resolve, reject) => {
-              database.run(
-                'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
-                ['notified', eventId, userId],
-                function(err) {
-                  if (err) reject(err);
-                  else resolve(this.changes);
-                }
-              );
-            });
-          }
-        } catch (err) {
-          console.error(`Error popping user from ${zone} queue:`, err);
-        }
-      }
+    if (!['cancellation', 'refund', 'courtesy_expired'].includes(reason)) {
+      return res.status(400).json({ 
+        error: 'reason must be one of: cancellation, refund, courtesy_expired' 
+      });
     }
 
-    res.json({
-      success: true,
+    // Add job to the queue instead of processing directly
+    const job = await ticketQueue.add('release-tickets', {
       event_id: eventId,
-      total_winners: winners.length,
-      zone_breakdown: Object.entries(zones).map(([zone, qty]) => ({
-        zone: zone,
-        requested: qty,
-        actual_winners: winners.filter(w => w.zone === zone).length
+      zones: zones,
+      reason: reason,
+      timestamp: new Date().toISOString()
+    });
+
+    console.log(`[API] Created ticket release job ${job.id} for event ${eventId}`);
+
+    // Return webhook/event-like response
+    res.json({
+      event: 'tickets_released',
+      job_id: job.id,
+      event_id: eventId,
+      zones: Object.entries(zones).map(([zone, quantity]) => ({
+        zone_id: zone,
+        quantity: quantity
       })),
-      winners: winners
+      reason: reason,
+      status: 'queued',
+      message: 'Ticket release job has been queued for processing'
     });
   } catch (err) {
     console.error('Error in release-tickets:', err);
@@ -288,5 +283,54 @@ router.delete('/:id', delete_legacy_waitlist);
 
 // Ruta para simular la liberación de boletos
 router.post('/events/:eventId/release-tickets', release_tickets);
+
+// Offer acceptance endpoint
+const accept_offer = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    // Try to accept the offer
+    const result = await acceptOffer(token);
+
+    if (!result) {
+      // Offer expired or not found
+      return res.status(410).json({
+        success: false,
+        error: 'offer_expired',
+        message: 'Tu oportunidad expiró. Has sido regresado a la lista.'
+      });
+    }
+
+    // Update SQLite status to 'accepted' (offer was successfully used)
+    const database = db.getDb();
+    await new Promise((resolve, reject) => {
+      database.run(
+        'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
+        ['accepted', result.event_id, result.user_id],
+        function(err) {
+          if (err) {
+            console.error('Error updating status to accepted:', err);
+            reject(err);
+          } else {
+            console.log(`[Offer] Updated user ${result.user_id} status to 'accepted'`);
+            resolve(this.changes);
+          }
+        }
+      );
+    });
+
+    // Offer accepted successfully
+    res.json(result);
+  } catch (err) {
+    console.error('Error accepting offer:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+router.post('/offers/:token/accept', accept_offer);
 
 module.exports = router;

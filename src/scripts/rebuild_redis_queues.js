@@ -14,7 +14,7 @@ async function rebuildRedisQueues() {
     // Get all waiting users from SQLite, ordered by created_at (oldest first)
     const waitingUsers = await new Promise((resolve, reject) => {
       database.all(
-        `SELECT event_id, user_id, zones_preferred, created_at 
+        `SELECT event_id, user_id, zones_preferred, quantity_wanted, created_at 
          FROM waitlist 
          WHERE status = 'waiting' 
          ORDER BY created_at ASC`,
@@ -43,25 +43,26 @@ async function rebuildRedisQueues() {
           queueData[queueKey] = [];
         }
         
-        queueData[queueKey].push(user.user_id);
+        // Store as "userId:quantity" format
+        queueData[queueKey].push(`${user.user_id}:${user.quantity_wanted}`);
       }
     }
 
     // Check each queue and rebuild if empty
     let rebuiltCount = 0;
     
-    for (const [queueKey, userIds] of Object.entries(queueData)) {
+    for (const [queueKey, userEntries] of Object.entries(queueData)) {
       const currentLength = await client.lLen(queueKey);
       
       if (currentLength === 0) {
         // Queue is empty, rebuild it
         // Push users in reverse order so oldest is at the end (FIFO with RPOP)
-        for (let i = userIds.length - 1; i >= 0; i--) {
-          await client.lPush(queueKey, userIds[i]);
+        for (let i = userEntries.length - 1; i >= 0; i--) {
+          await client.lPush(queueKey, userEntries[i]);
         }
         
         rebuiltCount++;
-        console.log(`✓ Rebuilt queue ${queueKey} with ${userIds.length} users`);
+        console.log(`✓ Rebuilt queue ${queueKey} with ${userEntries.length} users`);
       } else {
         console.log(`✓ Queue ${queueKey} already has ${currentLength} users, skipping`);
       }

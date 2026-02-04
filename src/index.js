@@ -6,6 +6,8 @@ const providersRoutes = require('./routes/providers');
 const initDb = require('./scripts/init_db');
 const { connect: connectRedis } = require('./cache/redis');
 const { rebuildRedisQueues } = require('./scripts/rebuild_redis_queues');
+const { startWorker } = require('./workers/ticketWorker');
+const { startExpirationListener } = require('./workers/offerExpirationListener');
 
 const app = express();
 app.use(bodyParser());
@@ -19,6 +21,17 @@ initDb().catch(err => {
 // initialize Redis and rebuild queues from SQLite if needed
 connectRedis()
   .then(() => rebuildRedisQueues())
+  .then(() => {
+    // Start the ticket release worker after Redis is connected
+    startWorker();
+    console.log('Ticket release worker initialized');
+    
+    // Start the offer expiration listener
+    return startExpirationListener();
+  })
+  .then(() => {
+    console.log('Offer expiration listener initialized');
+  })
   .catch(err => {
     console.error('Failed to initialize Redis or rebuild queues', err);
     process.exit(1);

@@ -4,6 +4,7 @@ const db = require('../db/sqlite');
 const { client } = require('../cache/redis');
 const { ticketQueue } = require('../queue/ticketQueue');
 const { acceptOffer, getOffer } = require('../utils/offers');
+const { validateApiKey, requireRole } = require('../middleware/apiKeyAuth');
 const crypto = require('crypto');
 
 const api_working = async (req, res) => {
@@ -209,28 +210,6 @@ const delete_waitlist_me = async (req, res) => {
   }
 };
 
-const create_legacy_waitlist = async (req, res) => {
-  try {
-    const { name, email } = req.body;
-    if (!name || !email) return res.status(400).json({ error: 'name and email required' });
-
-    const id = await db.add({ name, email });
-    res.status(201).json({ id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-const delete_legacy_waitlist = async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await db.remove(id);
-    res.status(204).end();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
 const release_tickets = async (req, res) => {
   try {
     const { eventId } = req.params;
@@ -274,20 +253,6 @@ const release_tickets = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
-// Routes
-router.get('/', api_working);
-
-// Rutas de la lista de espera por evento
-router.get('/events/:eventId/waitlist/me', get_waitlist_me); // Recibe el user id por los headers ya que no existe autenticacion
-router.post('/events/:eventId/waitlist', create_waitlist_entry);
-router.delete('/events/:eventId/waitlist/me', delete_waitlist_me);
-
-router.post('/', create_legacy_waitlist);
-router.delete('/:id', delete_legacy_waitlist);
-
-// Ruta para simular la liberación de boletos
-router.post('/events/:eventId/release-tickets', release_tickets);
 
 // Offer acceptance endpoint
 const accept_offer = async (req, res) => {
@@ -336,6 +301,18 @@ const accept_offer = async (req, res) => {
   }
 };
 
-router.post('/offers/:token/accept', accept_offer);
+// Routes
+router.get('/', api_working);
+
+// User endpoints - require 'user', 'promoter', or 'admin' role
+router.get('/events/:eventId/waitlist/me', validateApiKey, requireRole('user', 'admin'), get_waitlist_me);
+router.post('/events/:eventId/waitlist', validateApiKey, requireRole('user', 'admin'), create_waitlist_entry);
+router.delete('/events/:eventId/waitlist/me', validateApiKey, requireRole('user', 'admin'), delete_waitlist_me);
+
+// Offer acceptance - require 'user', 'promoter', or 'admin' role
+router.post('/offers/:token/accept', validateApiKey, requireRole('user', 'promoter', 'admin'), accept_offer);
+
+// Admin/Promoter only - ticket release
+router.post('/events/:eventId/release-tickets', validateApiKey, requireRole('promoter', 'admin'), release_tickets);
 
 module.exports = router;

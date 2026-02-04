@@ -2,13 +2,13 @@ const express = require('express');
 const router = express.Router();
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const { validateApiKey } = require('../middleware/apiKeyAuth');
+const { validateApiKey, requireEventOwnership } = require('../middleware/apiKeyAuth');
 const { client } = require('../cache/redis');
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
-// GET /providers/:eventId/waitlist - Requires API key
-router.get('/:eventId/waitlist', validateApiKey, async (req, res) => {
+// GET /providers/:eventId/waitlist - Requires API key and event ownership
+router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (req, res) => {
   try {
     console.log("Received provider waitlist request for event:", req.params.eventId);
     const { eventId } = req.params;

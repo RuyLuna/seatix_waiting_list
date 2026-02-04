@@ -15,7 +15,7 @@ async function validateApiKey(req, res, next) {
     const db = new sqlite3.Database(DB_PATH);
 
     db.get(
-      'SELECT id, name FROM api_keys WHERE name = ? AND active = 1',
+      'SELECT id, name, role, event_id FROM api_keys WHERE key_value = ? AND active = 1',
       [apiKey],
       (err, row) => {
         db.close();
@@ -40,6 +40,62 @@ async function validateApiKey(req, res, next) {
   }
 }
 
+// Check if user has permission for specific endpoint
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.apiKeyInfo) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const { role } = req.apiKeyInfo;
+
+    // Admin has access to everything
+    if (role === 'admin') {
+      return next();
+    }
+
+    // Check if user's role is in allowed roles
+    if (allowedRoles.includes(role)) {
+      return next();
+    }
+
+    return res.status(403).json({ 
+      error: 'Insufficient permissions',
+      detail: `This endpoint requires one of these roles: ${allowedRoles.join(', ')}`
+    });
+  };
+}
+
+// Check if promoter owns the event
+function requireEventOwnership(req, res, next) {
+  if (!req.apiKeyInfo) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const { role, event_id } = req.apiKeyInfo;
+
+  // Admin can access any event
+  if (role === 'admin') {
+    return next();
+  }
+
+  // Promoter must own this event
+  if (role === 'promoter') {
+    const requestedEventId = req.params.eventId;
+    
+    if (event_id === requestedEventId) {
+      return next();
+    }
+
+    return res.status(403).json({ 
+      error: 'You do not have permission to access this event',
+      detail: 'Promoters can only access their own events'
+    });
+  }
+
+  return res.status(403).json({ error: 'Insufficient permissions' });
+}
+
 // Utility function to create/add an API key
 async function addApiKey(name) {
   return new Promise((resolve, reject) => {
@@ -57,4 +113,4 @@ async function addApiKey(name) {
   });
 }
 
-module.exports = { validateApiKey, addApiKey };
+module.exports = { validateApiKey, requireRole, requireEventOwnership, addApiKey };

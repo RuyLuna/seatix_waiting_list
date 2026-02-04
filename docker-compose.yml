@@ -14,6 +14,7 @@ services:
 
   redis:
     image: redis:7
+    command: redis-server --appendonly yes --appendfsync everysec --save 60 1000 --notify-keyspace-events Ex
     ports:
       - "6379:6379"
     volumes:

@@ -2,73 +2,104 @@ const express = require('express');
 const router = express.Router();
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const { validateApiKey } = require('../middleware/apiKeyAuth');
+const { validateApiKey, requireEventOwnership } = require('../middleware/apiKeyAuth');
+const { client } = require('../cache/redis');
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
-// GET /providers/:eventId/waitlist - Requires API key
-router.get('/:eventId/waitlist', validateApiKey, async (req, res) => {
+// GET /providers/:eventId/waitlist - Requires API key and event ownership
+router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (req, res) => {
   try {
     console.log("Received provider waitlist request for event:", req.params.eventId);
     const { eventId } = req.params;
 
     const db = new sqlite3.Database(DB_PATH);
 
-    // Get all waitlist entries for this event ordered by position
-    db.all(
-      `SELECT 
-        entry_id, 
-        user_id, 
-        zones_preferred, 
-        quantity_wanted, 
-        status, 
-        created_at,
-        ROW_NUMBER() OVER (ORDER BY created_at ASC) as position
-       FROM waitlist 
-       WHERE event_id = ? 
-       ORDER BY created_at ASC`,
-      [eventId],
-      async (err, rows) => {
-        if (err) {
+    // Get all waiting users from SQLite for this event
+    const rows = await new Promise((resolve, reject) => {
+      db.all(
+        `SELECT 
+          entry_id, 
+          user_id, 
+          zones_preferred, 
+          quantity_wanted, 
+          status, 
+          created_at
+         FROM waitlist 
+         WHERE event_id = ? AND status = 'waiting'
+         ORDER BY created_at ASC`,
+        [eventId],
+        (err, rows) => {
           db.close();
-          console.error('Error fetching waitlist:', err);
-          return res.status(500).json({ error: 'Internal server error' });
+          if (err) reject(err);
+          else resolve(rows);
         }
+      );
+    });
 
-        // For demo purposes: extract user data from user_id (in a real app, you'd join with a users table)
-        // This is placeholder - adjust based on your actual user storage
-        const entries = rows.map(row => ({
-          position: row.position,
-          user: {
-            id: row.user_id,
-            name: `User ${row.user_id}`, // Placeholder - fetch from users table
-            email: `user${row.user_id}@example.com` // Placeholder
-          },
-          zones_preferred: row.zones_preferred.split(','),
-          quantity_wanted: row.quantity_wanted,
-          status: row.status
-        }));
+    // Get Redis queue data for each zone
+    const zoneQueues = {};
+    const allZones = new Set();
+    
+    // Collect all zones from user preferences
+    rows.forEach(row => {
+      const zones = JSON.parse(row.zones_preferred);
+      zones.forEach(zone => allZones.add(zone));
+    });
 
-        // Calculate summary
-        const summary = {
-          total_waiting: entries.filter(e => e.status === 'waiting').length,
-          by_zone: {}
-        };
+    // Fetch Redis queue for each zone
+    for (const zone of allZones) {
+      const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
+      const queue = await client.lRange(queueKey, 0, -1);
+      zoneQueues[zone] = queue;
+    }
 
-        entries.forEach(entry => {
-          entry.zones_preferred.forEach(zone => {
-            summary.by_zone[zone] = (summary.by_zone[zone] || 0) + 1;
-          });
-        });
+    // Build entries with Redis positions
+    const entries = rows.map(row => {
+      const zones = JSON.parse(row.zones_preferred);
+      const positions = {};
+      
+      // Get position in each zone queue from Redis
+      zones.forEach(zone => {
+        const queue = zoneQueues[zone] || [];
+        const index = queue.indexOf(row.user_id);
+        if (index !== -1) {
+          // Convert to 1-based position from front (FIFO)
+          positions[zone] = queue.length - index;
+        } else {
+          positions[zone] = null;
+        }
+      });
 
-        db.close();
+      return {
+        entry_id: row.entry_id,
+        user: {
+          id: row.user_id,
+          name: `User ${row.user_id}`, // Placeholder
+          email: `user${row.user_id}@example.com` // Placeholder
+        },
+        zones_preferred: zones,
+        quantity_wanted: row.quantity_wanted,
+        status: row.status,
+        positions: positions,
+        created_at: row.created_at
+      };
+    });
 
-        res.json({
-          entries,
-          summary
-        });
-      }
-    );
+    // Calculate summary from Redis queues
+    const summary = {
+      total_waiting: entries.length,
+      by_zone: {}
+    };
+
+    for (const [zone, queue] of Object.entries(zoneQueues)) {
+      summary.by_zone[zone] = queue.length;
+    }
+
+    res.json({
+      entries,
+      summary
+    });
   } catch (err) {
     console.error('Error in GET /events/:eventId/waitlist:', err);
     res.status(500).json({ error: 'Internal server error' });

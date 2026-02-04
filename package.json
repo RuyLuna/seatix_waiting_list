@@ -15,6 +15,7 @@
     "node": ">=16"
   },
   "dependencies": {
+    "bullmq": "^5.67.2",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "redis": "^4.7.1",

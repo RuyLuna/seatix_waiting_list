@@ -1,0 +1,10 @@
+services:
+  app:
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./:/usr/src/app
+      - /usr/src/app/node_modules
+      - ./data:/data
+    command: npm run dev

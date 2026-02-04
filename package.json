@@ -1,0 +1,26 @@
+{
+  "name": "seatix-waitlist-api",
+  "version": "0.1.0",
+  "description": "Waiting list API for a ticketing app (Express + Redis + SQLite)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "init-db": "node src/scripts/init_db.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "redis": "^4.6.7",
+    "sqlite3": "^5.1.6"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}

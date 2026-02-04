@@ -1,0 +1,23 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SQLITE_PATH=/data/waitlist.db
+    depends_on:
+      - redis
+    volumes:
+      - ./data:/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

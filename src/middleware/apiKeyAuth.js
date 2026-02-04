@@ -1,0 +1,60 @@
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+
+const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
+
+// Validate API key from headers
+async function validateApiKey(req, res, next) {
+  const apiKey = req.headers['x-api-key'];
+
+  if (!apiKey) {
+    return res.status(401).json({ error: 'Missing X-API-Key header' });
+  }
+
+  try {
+    const db = new sqlite3.Database(DB_PATH);
+
+    db.get(
+      'SELECT id, name FROM api_keys WHERE name = ? AND active = 1',
+      [apiKey],
+      (err, row) => {
+        db.close();
+
+        if (err) {
+          console.error('Error validating API key:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+
+        if (!row) {
+          return res.status(403).json({ error: 'Invalid API key' });
+        }
+
+        // Attach API key info to request
+        req.apiKeyInfo = row;
+        next();
+      }
+    );
+  } catch (err) {
+    console.error('Error in API key validation:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// Utility function to create/add an API key
+async function addApiKey(name) {
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(DB_PATH);
+
+    db.run(
+      'INSERT INTO api_keys (name, active) VALUES (?, 1)',
+      [name],
+      function(err) {
+        db.close();
+        if (err) reject(err);
+        else resolve({ id: this.lastID, name: name });
+      }
+    );
+  });
+}
+
+module.exports = { validateApiKey, addApiKey };

@@ -44,22 +44,19 @@ router.post('/events/:eventId/waitlist', async (req, res) => {
       );
     });
     
-    // Calculate position (count entries with earlier created_at)
-    const positionResult = await new Promise((resolve, reject) => {
-      database.get(
-        'SELECT COUNT(*) as count FROM waitlist WHERE event_id = ? AND created_at <= datetime("now")',
-        [eventId],
-        (err, row) => err ? reject(err) : resolve(row)
-      );
-    });
-    const position = positionResult.count;
-    
-    // Clear cache
-    await client.del(`waitlist:event:${eventId}`);
+    // Add user to Redis queue for EACH preferred zone
+    const positions = {};
+    for (const zone of zones_preferred) {
+      const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
+      await client.lPush(queueKey, user_id);
+      // Get position in this zone's queue (1-based)
+      const position = await client.lLen(queueKey);
+      positions[zone] = position;
+    }
     
     res.status(201).json({
       entry_id,
-      position,
+      positions,
       zones_preferred,
       quantity_wanted,
       status: 'waiting',
@@ -82,10 +79,10 @@ router.get('/events/:eventId/waitlist/me', async (req, res) => {
 
     const database = db.getDb();
     
-    // Get user's waitlist entry
+    // Get user's waitlist entry from SQLite
     const userEntry = await new Promise((resolve, reject) => {
       database.get(
-        'SELECT entry_id, status, created_at FROM waitlist WHERE event_id = ? AND user_id = ?',
+        'SELECT entry_id, zones_preferred, quantity_wanted, status, created_at FROM waitlist WHERE event_id = ? AND user_id = ?',
         [eventId, userId],
         (err, row) => err ? reject(err) : resolve(row)
       );
@@ -94,21 +91,30 @@ router.get('/events/:eventId/waitlist/me', async (req, res) => {
     if (!userEntry) {
       return res.status(404).json({ error: 'User not found in waitlist for this event' });
     }
+
+    const zonesPreferred = JSON.parse(userEntry.zones_preferred);
     
-    // Calculate estimated_ahead (count of entries with earlier created_at)
-    const aheadResult = await new Promise((resolve, reject) => {
-      database.get(
-        'SELECT COUNT(*) as count FROM waitlist WHERE event_id = ? AND created_at < ?',
-        [eventId, userEntry.created_at],
-        (err, row) => err ? reject(err) : resolve(row)
-      );
-    });
+    // Get user's position in each zone queue from Redis
+    const positions = {};
+    for (const zone of zonesPreferred) {
+      const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
+      // Get all users in queue and find this user's position
+      const queue = await client.lRange(queueKey, 0, -1);
+      const position = queue.indexOf(userId);
+      if (position !== -1) {
+        // Position is from end (FIFO: first in = last in list), convert to 1-based from front
+        positions[zone] = queue.length - position;
+      } else {
+        positions[zone] = null; // User not in this zone's queue (already notified?)
+      }
+    }
     
     res.json({
       entry_id: userEntry.entry_id,
-      position: userEntry.position,
+      positions,
+      zones_preferred: zonesPreferred,
+      quantity_wanted: userEntry.quantity_wanted,
       status: userEntry.status,
-      estimated_ahead: aheadResult.count,
       created_at: userEntry.created_at
     });
   } catch (err) {
@@ -128,7 +134,28 @@ router.delete('/events/:eventId/waitlist/me', async (req, res) => {
 
     const database = db.getDb();
     
-    // Delete user's waitlist entry
+    // Get user's zones_preferred before deleting
+    const userEntry = await new Promise((resolve, reject) => {
+      database.get(
+        'SELECT zones_preferred FROM waitlist WHERE event_id = ? AND user_id = ?',
+        [eventId, userId],
+        (err, row) => err ? reject(err) : resolve(row)
+      );
+    });
+
+    if (!userEntry) {
+      return res.status(404).json({ error: 'User not found in waitlist for this event' });
+    }
+
+    const zonesPreferred = JSON.parse(userEntry.zones_preferred);
+    
+    // Remove user from ALL zone queues in Redis
+    for (const zone of zonesPreferred) {
+      const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
+      await client.lRem(queueKey, 0, userId); // Remove all occurrences
+    }
+    
+    // Delete user's waitlist entry from SQLite
     await new Promise((resolve, reject) => {
       database.run(
         'DELETE FROM waitlist WHERE event_id = ? AND user_id = ?',
@@ -139,9 +166,6 @@ router.delete('/events/:eventId/waitlist/me', async (req, res) => {
         }
       );
     });
-    
-    // Clear cache
-    await client.del(`waitlist:event:${eventId}`);
     
     res.json({
       success: true,
@@ -174,6 +198,68 @@ router.delete('/:id', async (req, res) => {
     await client.del('waitlist:all');
     res.status(204).end();
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /events/:eventId/release-tickets - TEST ENDPOINT: Simulate ticket liberation
+router.post('/events/:eventId/release-tickets', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { zones } = req.body;
+
+    if (!zones || typeof zones !== 'object') {
+      return res.status(400).json({ error: 'zones object is required (e.g., { "VIP": 5, "General": 10 })' });
+    }
+
+    const winners = [];
+
+    // Process each zone
+    for (const [zone, quantity] of Object.entries(zones)) {
+      // Pop users from the Redis zone queue
+      for (let i = 0; i < quantity; i++) {
+        try {
+          const userId = await client.rPop(`waitlist:event:${eventId}:zone:${zone}`);
+          
+          if (userId) {
+            winners.push({
+              user_id: userId,
+              zone: zone,
+              ticket_position: i + 1
+            });
+
+            // Update SQLite to mark user as notified
+            const database = db.getDb();
+            await new Promise((resolve, reject) => {
+              database.run(
+                'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
+                ['notified', eventId, userId],
+                function(err) {
+                  if (err) reject(err);
+                  else resolve(this.changes);
+                }
+              );
+            });
+          }
+        } catch (err) {
+          console.error(`Error popping user from ${zone} queue:`, err);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      event_id: eventId,
+      total_winners: winners.length,
+      zone_breakdown: Object.entries(zones).map(([zone, qty]) => ({
+        zone: zone,
+        requested: qty,
+        actual_winners: winners.filter(w => w.zone === zone).length
+      })),
+      winners: winners
+    });
+  } catch (err) {
+    console.error('Error in release-tickets:', err);
     res.status(500).json({ error: err.message });
   }
 });

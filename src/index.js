@@ -5,6 +5,7 @@ const waitlistRoutes = require('./routes/waitlist');
 const providersRoutes = require('./routes/providers');
 const initDb = require('./scripts/init_db');
 const { connect: connectRedis } = require('./cache/redis');
+const { rebuildRedisQueues } = require('./scripts/rebuild_redis_queues');
 
 const app = express();
 app.use(bodyParser());
@@ -15,11 +16,13 @@ initDb().catch(err => {
   process.exit(1);
 });
 
-// initialize Redis
-connectRedis().catch(err => {
-  console.error('Failed to connect to Redis', err);
-  process.exit(1);
-});
+// initialize Redis and rebuild queues from SQLite if needed
+connectRedis()
+  .then(() => rebuildRedisQueues())
+  .catch(err => {
+    console.error('Failed to initialize Redis or rebuild queues', err);
+    process.exit(1);
+  });
 
 app.use('/waitlist', waitlistRoutes);
 app.use('/providers', providersRoutes);

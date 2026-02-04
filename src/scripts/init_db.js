@@ -23,8 +23,8 @@ const ensure = async () => {
     CREATE INDEX IF NOT EXISTS idx_waitlist_event_id
       ON waitlist (event_id);
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_waitlist_unique_event_user_zones
-      ON waitlist (event_id, user_id, zones_preferred);
+    CREATE INDEX IF NOT EXISTS idx_waitlist_user_status
+      ON waitlist (event_id, user_id, status);
 
     CREATE TABLE IF NOT EXISTS api_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

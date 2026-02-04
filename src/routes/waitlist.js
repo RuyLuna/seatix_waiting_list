@@ -26,35 +26,40 @@ const create_waitlist_entry = async (req, res) => {
       return res.status(400).json({ error: 'user_id, zones_preferred, and quantity_wanted are required' });
     }
 
-    // Generate entry_id
-    const entry_id = crypto.randomUUID();
-    
     const database = db.getDb();
     
-    // Insert new entry - this will fail if unique constraint is violated
-    try {
-      await new Promise((resolve, reject) => {
-        database.run(
-          `INSERT INTO waitlist (entry_id, event_id, user_id, zones_preferred, quantity_wanted, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'waiting', datetime('now'))`,
-          [entry_id, eventId, user_id, JSON.stringify(zones_preferred), quantity_wanted],
-          function(err) {
-            if (err) reject(err);
-            else resolve(this);
-          }
-        );
+    // Check if user already has an active entry for these zones (waiting or notified)
+    const activeEntry = await new Promise((resolve, reject) => {
+      database.get(
+        `SELECT entry_id, status FROM waitlist 
+         WHERE event_id = ? AND user_id = ? AND zones_preferred = ? 
+         AND status IN ('waiting', 'notified')`,
+        [eventId, user_id, JSON.stringify(zones_preferred)],
+        (err, row) => err ? reject(err) : resolve(row)
+      );
+    });
+
+    if (activeEntry) {
+      // User is already in the waitlist or has a pending offer
+      return res.status(409).json({ 
+        error: 'Ya estás registrado en la lista de espera para estas zonas en este evento',
+        detail: 'User already registered for these zones in this event'
       });
-    } catch (dbError) {
-      // Check if it's a unique constraint violation
-      if (dbError.message && dbError.message.includes('UNIQUE constraint failed')) {
-        return res.status(409).json({ 
-          error: 'Ya estás registrado en la lista de espera para estas zonas en este evento',
-          detail: 'User already registered for these zones in this event'
-        });
-      }
-      // Re-throw other database errors
-      throw dbError;
     }
+    
+    // Create new entry (even if user previously had 'accepted' status - keep old record for audit)
+    const entry_id = crypto.randomUUID();
+    await new Promise((resolve, reject) => {
+      database.run(
+        `INSERT INTO waitlist (entry_id, event_id, user_id, zones_preferred, quantity_wanted, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'waiting', datetime('now'))`,
+        [entry_id, eventId, user_id, JSON.stringify(zones_preferred), quantity_wanted],
+        function(err) {
+          if (err) reject(err);
+          else resolve(this);
+        }
+      );
+    });
     
     // Only add to Redis if SQLite insert was successful
     // Store as "userId:quantity" to enable quantity-based filtering during ticket release

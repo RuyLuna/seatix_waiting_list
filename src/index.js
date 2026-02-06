@@ -47,6 +47,13 @@ app.use('/waitlist', waitlistRoutes);
 app.use('/providers', providersRoutes);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Seatix waitlist API listening on port ${PORT}`);
-});
+
+// Export app for testing
+module.exports = app;
+
+// Only start server if this file is run directly (not imported)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Seatix waitlist API listening on port ${PORT}`);
+  });
+}

@@ -1,5 +1,9 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+import sqlite3 from 'sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
@@ -12,7 +16,8 @@ async function validateApiKey(req, res, next) {
   }
 
   try {
-    const db = new sqlite3.Database(DB_PATH);
+    const sqlite = sqlite3.verbose();
+    const db = new sqlite.Database(DB_PATH);
 
     db.get(
       'SELECT id, name, role, event_id FROM api_keys WHERE key_value = ? AND active = 1',
@@ -99,7 +104,8 @@ function requireEventOwnership(req, res, next) {
 // Utility function to create/add an API key
 async function addApiKey(name) {
   return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(DB_PATH);
+    const sqlite = sqlite3.verbose();
+    const db = new sqlite.Database(DB_PATH);
 
     db.run(
       'INSERT INTO api_keys (name, active) VALUES (?, 1)',
@@ -113,4 +119,4 @@ async function addApiKey(name) {
   });
 }
 
-module.exports = { validateApiKey, requireRole, requireEventOwnership, addApiKey };
+export { validateApiKey, requireRole, requireEventOwnership, addApiKey };

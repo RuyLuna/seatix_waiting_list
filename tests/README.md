@@ -48,8 +48,8 @@ import request from 'supertest';
 import { cleanWaitlistData, createTestApiKey } from '../helpers/testUtils.mjs';
 import { endpoints, samplePayloads } from '../helpers/apiClient.mjs';
 
-// Import Express app (will need to export app from index.js)
-const appModule = await import('../../src/index.js');
+// Import Express app (will need to export app from index.ts)
+const appModule = await import('../../src/index.ts');
 const app = appModule.default;
 
 describe('Waitlist API', () => {

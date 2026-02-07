@@ -1,7 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const sqlite = require('../db/sqlite');
-const { addApiKey } = require('../middleware/apiKeyAuth');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import * as sqlite from '../db/sqlite.js';
+import { addApiKey } from '../middleware/apiKeyAuth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Script to create and manage API keys
@@ -35,8 +39,8 @@ const main = async () => {
   }
 };
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 
-module.exports = { ensure };
+export { ensure };

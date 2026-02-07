@@ -1,4 +1,4 @@
-const redis = require('redis');
+import redis from 'redis';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
@@ -15,4 +15,4 @@ async function connect() {
   }
 }
 
-module.exports = { client, connect, REDIS_URL };
+export { client, connect, REDIS_URL };

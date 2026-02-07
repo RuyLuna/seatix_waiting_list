@@ -1,11 +1,11 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const db = require('../db/sqlite');
-const { client } = require('../cache/redis');
-const { ticketQueue } = require('../queue/ticketQueue');
-const { acceptOffer, getOffer } = require('../utils/offers');
-const { validateApiKey, requireRole } = require('../middleware/apiKeyAuth');
-const crypto = require('crypto');
+import * as db from '../db/sqlite.js';
+import { client } from '../cache/redis.js';
+import { ticketQueue } from '../queue/ticketQueue.js';
+import { acceptOffer, getOffer } from '../utils/offers.js';
+import { validateApiKey, requireRole } from '../middleware/apiKeyAuth.js';
+import crypto from 'crypto';
 
 const api_working = async (req, res) => {
   try {
@@ -315,4 +315,4 @@ router.post('/offers/:token/accept', validateApiKey, requireRole('user', 'promot
 // Admin/Promoter only - ticket release
 router.post('/events/:eventId/release-tickets', validateApiKey, requireRole('promoter', 'admin'), release_tickets);
 
-module.exports = router;
+export default router;

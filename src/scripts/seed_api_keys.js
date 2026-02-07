@@ -1,4 +1,4 @@
-const db = require('../db/sqlite');
+import * as db from '../db/sqlite.js';
 
 /**
  * Seed test API keys for development
@@ -74,8 +74,8 @@ async function seedApiKeys() {
   }
 }
 
-if (require.main === module) {
-  const sqlite = require('../db/sqlite');
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const sqlite = await import('../db/sqlite.js');
   sqlite.initDb()
     .then(() => seedApiKeys())
     .then(() => {
@@ -88,4 +88,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = seedApiKeys;
+export default seedApiKeys;

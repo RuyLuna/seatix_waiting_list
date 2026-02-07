@@ -7,7 +7,7 @@ This is a **dual-storage event waitlist system** using Node.js/Express with SQLi
 **Core Pattern**: SQLite is the source of truth for waitlist entries; Redis maintains FIFO queues per event+zone for fast position tracking and ticket releases. On startup, `rebuild_redis_queues.js` syncs Redis from SQLite if queues are empty.
 
 **Key Components**:
-- [src/index.js](src/index.js) - Entry point; initializes DB, Redis, queue worker, expiration listener, and triggers queue rebuild
+- [src/index.ts](src/index.ts) - Entry point; initializes DB, Redis, queue worker, expiration listener, and triggers queue rebuild
 - [src/routes/waitlist.js](src/routes/waitlist.js) - User-facing waitlist operations (POST, GET, DELETE) and offer acceptance
 - [src/routes/providers.js](src/routes/providers.js) - Provider-facing endpoint (API key protected)
 - [src/queue/ticketQueue.js](src/queue/ticketQueue.js) - BullMQ queue configuration for ticket releases

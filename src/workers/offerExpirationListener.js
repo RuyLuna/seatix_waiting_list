@@ -1,5 +1,5 @@
-const redis = require('redis');
-const db = require('../db/sqlite');
+import redis from 'redis';
+import * as db from '../db/sqlite.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
@@ -52,7 +52,7 @@ async function handleExpiredKey(expiredKey) {
     console.log(`[Expiration Listener] Offer expired: ${token}`);
 
     // Get metadata to find user info
-    const { client } = require('../cache/redis');
+    const { client } = await import('../cache/redis.js');
     const metaData = await client.get(metaKey);
 
     if (!metaData) {
@@ -116,7 +116,7 @@ async function stopExpirationListener() {
   }
 }
 
-module.exports = {
+export {
   startExpirationListener,
   stopExpirationListener
 };

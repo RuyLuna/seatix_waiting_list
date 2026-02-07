@@ -1,5 +1,5 @@
-const db = require('../db/sqlite');
-const { client } = require('../cache/redis');
+import * as db from '../db/sqlite.js';
+import { client } from '../cache/redis.js';
 
 /**
  * Rebuild Redis queues from SQLite on app startup
@@ -80,4 +80,4 @@ async function rebuildRedisQueues() {
   }
 }
 
-module.exports = { rebuildRedisQueues };
+export { rebuildRedisQueues };

@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const { client } = require('../cache/redis');
+import crypto from 'crypto';
+import { client } from '../cache/redis.js';
 
 const OFFER_TTL_MINUTES = parseInt(process.env.OFFER_TTL_MINUTES || '10');
 const OFFER_TTL_SECONDS = OFFER_TTL_MINUTES * 60;
@@ -103,7 +103,7 @@ async function acceptOffer(token) {
   }
 }
 
-module.exports = {
+export {
   generateOfferToken,
   createOffer,
   getOffer,

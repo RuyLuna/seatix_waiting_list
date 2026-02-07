@@ -1,9 +1,13 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const { validateApiKey, requireEventOwnership } = require('../middleware/apiKeyAuth');
-const { client } = require('../cache/redis');
+import sqlite3 from 'sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { validateApiKey, requireEventOwnership } from '../middleware/apiKeyAuth.js';
+import { client } from '../cache/redis.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
@@ -13,7 +17,8 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     console.log("Received provider waitlist request for event:", req.params.eventId);
     const { eventId } = req.params;
 
-    const db = new sqlite3.Database(DB_PATH);
+    const sqlite = sqlite3.verbose();
+    const db = new sqlite.Database(DB_PATH);
 
     // Get all waiting users from SQLite for this event
     const rows = await new Promise((resolve, reject) => {
@@ -106,4 +111,4 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
   }
 });
 
-module.exports = router;
+export default router;

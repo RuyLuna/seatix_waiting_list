@@ -1,7 +1,7 @@
-const { Worker } = require('bullmq');
-const db = require('../db/sqlite');
-const { client } = require('../cache/redis');
-const { createOffer } = require('../utils/offers');
+import { Worker } from 'bullmq';
+import * as db from '../db/sqlite.js';
+import { client } from '../cache/redis.js';
+import { createOffer } from '../utils/offers.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
@@ -160,4 +160,4 @@ function stopWorker() {
   }
 }
 
-module.exports = { startWorker, stopWorker };
+export { startWorker, stopWorker };

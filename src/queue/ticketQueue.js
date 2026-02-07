@@ -1,4 +1,4 @@
-const { Queue } = require('bullmq');
+import { Queue } from 'bullmq';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
@@ -36,4 +36,4 @@ ticketQueue.on('error', (err) => {
   console.error('Ticket Queue Error:', err);
 });
 
-module.exports = { ticketQueue };
+export { ticketQueue };

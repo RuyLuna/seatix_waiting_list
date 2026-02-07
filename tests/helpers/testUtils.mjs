@@ -1,9 +1,5 @@
-import { createRequire } from 'module';
-
-// Import CommonJS modules from src using createRequire
-const require = createRequire(import.meta.url);
-const { client } = require('../../src/cache/redis.js');
-const db = require('../../src/db/sqlite.js');
+import { client } from '../../dist/cache/redis.js';
+import * as db from '../../dist/db/sqlite.js';
 
 /**
  * Test utility functions for integration tests

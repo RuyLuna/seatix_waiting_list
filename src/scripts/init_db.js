@@ -1,6 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const sqlite = require('../db/sqlite');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import * as sqlite from '../db/sqlite.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const ensure = async () => {
   const dbPath = sqlite.DB_PATH;
@@ -45,7 +49,7 @@ const ensure = async () => {
   });
 };
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   ensure()
     .then(() => console.log('DB initialized'))
     .catch((err) => {
@@ -54,4 +58,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = ensure;
+export default ensure;

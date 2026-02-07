@@ -1,11 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createRequire } from 'module';
-
-// Import Express app (CommonJS module)
-const require = createRequire(import.meta.url);
-const app = require('../../src/index.js');
-const { cleanWaitlistData, generateUserId } = require('../helpers/testUtils.mjs');
+import app from '../../dist/index.js';
+import { cleanWaitlistData, generateUserId } from '../helpers/testUtils.mjs';
 
 // Test API keys (seeded by seedApiKeys script)
 const TEST_USER_API_KEY = 'sk_test_user_12345';

@@ -1,5 +1,9 @@
-const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+import path from 'path';
+import { fileURLToPath } from 'url';
+import sqlite3 from 'sqlite3';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
@@ -8,7 +12,8 @@ let db;
 // Initialize database connection
 function initDb() {
   return new Promise((resolve, reject) => {
-    db = new sqlite3.Database(DB_PATH, (err) => {
+    const sqlite = sqlite3.verbose();
+    db = new sqlite.Database(DB_PATH, (err) => {
       if (err) {
         console.error('Error opening database:', err.message);
         reject(err);
@@ -91,12 +96,12 @@ function closeDb() {
   });
 }
 
-module.exports = { 
+export { 
   initDb, 
   getDb, 
   getAll, 
   add, 
   remove, 
   closeDb,
-  DB_PATH 
+  DB_PATH
 };

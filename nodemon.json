@@ -1,7 +1,8 @@
 {
-  "watch": ["."],
-  "ext": "js,json",
-  "ignore": ["node_modules/**/*", "data/**/*", ".git/**/*"],
+  "watch": ["src"],
+  "ext": "ts,json",
+  "ignore": ["node_modules/**/*", "data/**/*", ".git/**/*", "dist/**/*"],
+  "exec": "npm run build && node dist/index.js",
   "legacyWatch": true,
   "polling": true,
   "verbose": true,

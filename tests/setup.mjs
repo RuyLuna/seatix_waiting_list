@@ -1,11 +1,7 @@
 import { beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { createRequire } from 'module';
-
-// Import CommonJS modules from src using createRequire
-const require = createRequire(import.meta.url);
-const { client } = require('../src/cache/redis.js');
-const db = require('../src/db/sqlite.js');
-const initDb = require('../src/scripts/init_db.js');
+import { client } from '../dist/cache/redis.js';
+import * as db from '../dist/db/sqlite.js';
+import initDb from '../dist/scripts/init_db.js';
 
 /**
  * Global test setup

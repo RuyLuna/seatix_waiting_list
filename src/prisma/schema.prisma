@@ -1,0 +1,52 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/prisma"
+}
+
+datasource db {
+  provider          = "mysql"
+}
+
+model Waitlist {
+  entryId String @id @map("entry_id")
+
+  eventId String @map("event_id")
+
+  userId String @map("user_id")
+
+  zonesPreferred String @map("zones_preferred") // Stored as JSON string
+
+  quantityWanted Int @map("quantity_wanted")
+
+  status String @default("waiting")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([eventId], map: "idx_waitlist_event_id")
+  @@index([eventId, userId, status], map: "idx_waitlist_user_status")
+  @@map("waitlist")
+}
+
+model ApiKey {
+  id Int @id @default(autoincrement())
+
+  name String
+
+  keyValue String @unique @map("key_value")
+
+  role String
+
+  eventId String? @map("event_id")
+
+  active Int @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("api_keys")
+}

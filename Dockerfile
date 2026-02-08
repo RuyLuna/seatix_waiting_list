@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:22.12-slim
 WORKDIR /usr/src/app
 
 # install sqlite3 CLI tool

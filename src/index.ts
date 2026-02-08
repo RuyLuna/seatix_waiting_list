@@ -8,6 +8,7 @@ import { connect as connectRedis } from './cache/redis.js';
 import { rebuildRedisQueues } from './scripts/rebuild_redis_queues.js';
 import { startWorker } from './workers/ticketWorker.js';
 import { startExpirationListener } from './workers/offerExpirationListener.js';
+import { prisma } from './db/prisma.js';
 
 const app: Express = express();
 app.use(express.json());
@@ -41,6 +42,18 @@ connectRedis()
     console.error('Failed to initialize Redis or rebuild queues', err);
     process.exit(1);
   });
+
+try {
+  await prisma.$connect();
+  console.log('✅ Database connected successfully');
+  
+  // Optional: Test a simple query
+  const count = await prisma.waitlist.count();
+  console.log(`📊 Waitlist entries: ${count}`);
+} catch (error) {
+  console.error('❌ Database connection failed:', error);
+  process.exit(1);
+}
 
 app.use('/waitlist', waitlistRoutes);
 app.use('/providers', providersRoutes);

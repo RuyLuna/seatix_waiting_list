@@ -9,6 +9,11 @@
     "start": "node dist/index.js",
     "dev": "nodemon",
     "init-db": "node dist/scripts/init_db.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:push": "prisma db push",
+    "prisma:test": "tsc test-prisma.ts && node test-prisma.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -20,6 +25,8 @@
     "node": ">=16"
   },
   "dependencies": {
+    "@prisma/adapter-mariadb": "^7.3.0",
+    "@prisma/client": "^7.3.0",
     "bullmq": "^5.67.2",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
@@ -29,8 +36,10 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/node": "^25.2.2",
     "@vitest/coverage-v8": "^1.2.0",
     "nodemon": "^3.1.11",
+    "prisma": "^7.3.0",
     "supertest": "^6.3.4",
     "vitest": "^1.2.0"
   }

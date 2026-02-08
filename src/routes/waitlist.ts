@@ -13,15 +13,25 @@ import type {
   ReleaseTicketsBody, 
   Positions 
 } from '../types/index.js';
+import { prisma } from '../db/prisma.js';
 
 const api_working = async (req: Request, res: Response): Promise<void> => {
   try {
+
+    const allWaitlistEntries = await prisma.waitlist.findMany();
+    console.log('All waitlist entries from Prisma:', allWaitlistEntries);
+
     res.json({
-        success: true
+      success: true,
+      message: 'API is working and connected to the database',
+      prismaMessage: `Successfully retrieved ${allWaitlistEntries.length} waitlist entries from the database`
     });
   } catch (err) {
     const error = err as Error;
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      prisma_test_failed: true 
+    });
   }
 };
 

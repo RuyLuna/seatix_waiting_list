@@ -1,13 +1,6 @@
-import sqlite3 from 'sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { Request, Response, NextFunction } from 'express';
+import { prisma } from '../db/prisma.js';
 import type { ApiKeyInfo } from '../types/index.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
 // Extend Express Request to include apiKeyInfo
 declare global {
@@ -28,31 +21,27 @@ async function validateApiKey(req: Request, res: Response, next: NextFunction) {
   }
 
   try {
-    const sqlite = sqlite3.verbose();
-    const db = new sqlite.Database(DB_PATH);
-
-    db.get(
-      'SELECT id, name, role, event_id FROM api_keys WHERE key_value = ? AND active = 1',
-      [apiKey],
-      (err: Error | null, row: ApiKeyInfo | undefined) => {
-        db.close();
-
-        if (err) {
-          console.error('Error validating API key:', err);
-          res.status(500).json({ error: 'Internal server error' });
-          return;
-        }
-
-        if (!row) {
-          res.status(403).json({ error: 'Invalid API key' });
-          return;
-        }
-
-        // Attach API key info to request
-        req.apiKeyInfo = row;
-        next();
+    const row = await prisma.apiKey.findFirst({
+      where: {
+        keyValue: apiKey as string,
+        active: 1
+      },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        eventId: true
       }
-    );
+    });
+
+    if (!row) {
+      res.status(403).json({ error: 'Invalid API key' });
+      return;
+    }
+
+    // Attach API key info to request
+    req.apiKeyInfo = row as ApiKeyInfo;
+    next();
   } catch (err) {
     console.error('Error in API key validation:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -95,7 +84,7 @@ function requireEventOwnership(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  const { role, event_id } = req.apiKeyInfo;
+  const { role, eventId } = req.apiKeyInfo;
 
   // Admin can access any event
   if (role === 'admin') {
@@ -107,7 +96,7 @@ function requireEventOwnership(req: Request, res: Response, next: NextFunction):
   if (role === 'promoter') {
     const requestedEventId = req.params.eventId;
     
-    if (event_id === requestedEventId) {
+    if (eventId === requestedEventId) {
       next();
       return;
     }
@@ -124,20 +113,20 @@ function requireEventOwnership(req: Request, res: Response, next: NextFunction):
 
 // Utility function to create/add an API key
 async function addApiKey(name: string): Promise<{ id: number; name: string }> {
-  return new Promise((resolve, reject) => {
-    const sqlite = sqlite3.verbose();
-    const db = new sqlite.Database(DB_PATH);
-
-    db.run(
-      'INSERT INTO api_keys (name, active) VALUES (?, 1)',
-      [name],
-      function(this: sqlite3.RunResult, err: Error | null) {
-        db.close();
-        if (err) reject(err);
-        else resolve({ id: this.lastID, name: name });
-      }
-    );
+  const result = await prisma.apiKey.create({
+    data: {
+      name: name,
+      keyValue: name, // Placeholder - should use proper key generation
+      role: 'user',
+      active: 1
+    },
+    select: {
+      id: true,
+      name: true
+    }
   });
+  
+  return result;
 }
 
 export { validateApiKey, requireRole, requireEventOwnership, addApiKey };

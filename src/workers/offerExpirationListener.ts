@@ -1,6 +1,5 @@
 import redis, { RedisClientType } from 'redis';
-import * as db from '../db/sqlite.js';
-import sqlite3 from 'sqlite3';
+import { prisma } from '../db/prisma.js';
 import type { OfferData, UserEntry } from '../types/index.js';
 
 const REDIS_URL: string = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
@@ -9,7 +8,7 @@ let subscriber: RedisClientType | undefined;
 
 /**
  * Start listening for Redis keyspace notifications on expired keys
- * When an offer expires, update SQLite status and optionally re-add user to queue
+ * When an offer expires, update database status and optionally re-add user to queue
  */
 async function startExpirationListener(): Promise<void> {
   try {
@@ -39,7 +38,7 @@ async function startExpirationListener(): Promise<void> {
 
 /**
  * Handle an expired Redis key
- * If it's an offer key, update SQLite and re-add user to queue
+ * If it's an offer key, update database and re-add user to queue
  */
 async function handleExpiredKey(expiredKey: string): Promise<void> {
   try {
@@ -67,33 +66,34 @@ async function handleExpiredKey(expiredKey: string): Promise<void> {
 
     console.log(`[Expiration Listener] Processing expired offer for user ${user_id} (event: ${event_id}, zone: ${zone})`);
 
-    // Update SQLite status back to 'waiting' (user returns to queue)
-    const database = db.getDb();
-    await new Promise<number>((resolve, reject) => {
-      database.run(
-        'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ? AND status = ?',
-        ['waiting', event_id, user_id, 'notified'],
-        function(this: sqlite3.RunResult, err: Error | null) {
-          if (err) reject(err);
-          else resolve(this.changes);
-        }
-      );
+    // Update database status back to 'waiting' (user returns to queue)
+    await prisma.waitlist.updateMany({
+      where: {
+        eventId: event_id,
+        userId: user_id,
+        status: 'notified'
+      },
+      data: {
+        status: 'waiting'
+      }
     });
 
     // Re-add user to Redis queue with their original quantity
     const queueKey: string = `waitlist:event:${event_id}:zone:${zone}`;
     
-    // Get quantity_wanted from SQLite
-    const userEntry = await new Promise<UserEntry | undefined>((resolve, reject) => {
-      database.get(
-        'SELECT quantity_wanted FROM waitlist WHERE event_id = ? AND user_id = ?',
-        [event_id, user_id],
-        (err: Error | null, row: UserEntry | undefined) => err ? reject(err) : resolve(row)
-      );
+    // Get quantity_wanted from database
+    const userEntry = await prisma.waitlist.findFirst({
+      where: {
+        eventId: event_id,
+        userId: user_id
+      },
+      select: {
+        quantityWanted: true
+      }
     });
 
     if (userEntry) {
-      const redisValue: string = `${user_id}:${userEntry.quantity_wanted}`;
+      const redisValue: string = `${user_id}:${userEntry.quantityWanted}`;
       await client.lPush(queueKey, redisValue);
       console.log(`[Expiration Listener] User ${user_id} returned to queue for zone ${zone}`);
     }

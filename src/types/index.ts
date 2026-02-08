@@ -20,7 +20,7 @@ export interface ApiKeyInfo {
   id: number;
   name: string;
   role: 'user' | 'promoter' | 'admin';
-  event_id?: string;
+  eventId?: string;
 }
 
 // ============================================================================

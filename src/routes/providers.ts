@@ -1,16 +1,9 @@
 import express, { Request, Response, NextFunction } from 'express';
 const router = express.Router();
-import sqlite3 from 'sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { validateApiKey, requireEventOwnership } from '../middleware/apiKeyAuth.js';
 import { client } from '../cache/redis.js';
+import { prisma } from '../db/prisma.js';
 import type { WaitlistEntry, Positions } from '../types/index.js';
-
-const __filename: string = fileURLToPath(import.meta.url);
-const __dirname: string = path.dirname(__filename);
-
-const DB_PATH: string = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
 // Interface for zone queues
 interface ZoneQueues {
@@ -29,31 +22,25 @@ interface Summary {
 router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (req: Request, res: Response) => {
   try {
     console.log("Received provider waitlist request for event:", req.params.eventId);
-    const { eventId } = req.params;
+    const eventId = req.params.eventId as string;
 
-    const sqlite = sqlite3.verbose();
-    const db = new sqlite.Database(DB_PATH);
-
-    // Get all waiting users from SQLite for this event
-    const rows = await new Promise<WaitlistEntry[]>((resolve, reject) => {
-      db.all(
-        `SELECT 
-          entry_id, 
-          user_id, 
-          zones_preferred, 
-          quantity_wanted, 
-          status, 
-          created_at
-         FROM waitlist 
-         WHERE event_id = ? AND status = 'waiting'
-         ORDER BY created_at ASC`,
-        [eventId],
-        (err: Error | null, rows: WaitlistEntry[]) => {
-          db.close();
-          if (err) reject(err);
-          else resolve(rows);
-        }
-      );
+    // Get all waiting users from Prisma for this event
+    const rows = await prisma.waitlist.findMany({
+      where: {
+        eventId: eventId,
+        status: 'waiting'
+      },
+      orderBy: {
+        createdAt: 'asc'
+      },
+      select: {
+        entryId: true,
+        userId: true,
+        zonesPreferred: true,
+        quantityWanted: true,
+        status: true,
+        createdAt: true
+      }
     });
 
     // Get Redis queue data for each zone
@@ -61,8 +48,8 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     const allZones = new Set<string>();
     
     // Collect all zones from user preferences
-    rows.forEach((row: WaitlistEntry) => {
-      const zones: string[] = JSON.parse(row.zones_preferred);
+    rows.forEach((row) => {
+      const zones: string[] = JSON.parse(row.zonesPreferred);
       zones.forEach((zone: string) => allZones.add(zone));
     });
 
@@ -74,14 +61,14 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     }
 
     // Build entries with Redis positions
-    const entries = rows.map((row: WaitlistEntry) => {
-      const zones: string[] = JSON.parse(row.zones_preferred);
+    const entries = rows.map((row) => {
+      const zones: string[] = JSON.parse(row.zonesPreferred);
       const positions: Positions = {};
       
       // Get position in each zone queue from Redis
       zones.forEach((zone: string) => {
         const queue: string[] = zoneQueues[zone] || [];
-        const index: number = queue.indexOf(row.user_id || '');
+        const index: number = queue.indexOf(row.userId || '');
         if (index !== -1) {
           // Convert to 1-based position from front (FIFO)
           positions[zone] = queue.length - index;
@@ -91,17 +78,17 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
       });
 
       return {
-        entry_id: row.entry_id,
+        entry_id: row.entryId,
         user: {
-          id: row.user_id,
-          name: `User ${row.user_id}`, // Placeholder
-          email: `user${row.user_id}@example.com` // Placeholder
+          id: row.userId,
+          name: `User ${row.userId}`, // Placeholder
+          email: `user${row.userId}@example.com` // Placeholder
         },
         zones_preferred: zones,
-        quantity_wanted: row.quantity_wanted,
+        quantity_wanted: row.quantityWanted,
         status: row.status,
         positions: positions,
-        created_at: row.created_at
+        created_at: row.createdAt
       };
     });
 

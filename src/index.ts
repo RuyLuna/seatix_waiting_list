@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express, { Express } from 'express';
 import waitlistRoutes from './routes/waitlist.js';
 import providersRoutes from './routes/providers.js';
-import initDb from './scripts/init_db.js';
 import seedApiKeys from './scripts/seed_api_keys.js';
 import { connect as connectRedis } from './cache/redis.js';
 import { rebuildRedisQueues } from './scripts/rebuild_redis_queues.js';
@@ -13,18 +12,26 @@ import { prisma } from './db/prisma.js';
 const app: Express = express();
 app.use(express.json());
 
-// initialize DB (creates tables if needed)
-initDb()
-  .then(() => seedApiKeys())
-  .then(() => {
+// Initialize Prisma and seed API keys
+(async () => {
+  try {
+    await prisma.$connect();
+    console.log('✅ Database connected successfully');
+    
+    // Test connection with a simple query
+    const count = await prisma.waitlist.count();
+    console.log(`📊 Waitlist entries: ${count}`);
+    
+    // Seed test API keys
+    await seedApiKeys();
     console.log('Database and test API keys initialized');
-  })
-  .catch((err: Error) => {
-    console.error('Failed to initialize DB or seed API keys', err);
+  } catch (err) {
+    console.error('❌ Failed to initialize database or seed API keys', err);
     process.exit(1);
-  });
+  }
+})();
 
-// initialize Redis and rebuild queues from SQLite if needed
+// Initialize Redis and rebuild queues from database if needed
 connectRedis()
   .then(() => rebuildRedisQueues())
   .then(() => {
@@ -42,18 +49,6 @@ connectRedis()
     console.error('Failed to initialize Redis or rebuild queues', err);
     process.exit(1);
   });
-
-try {
-  await prisma.$connect();
-  console.log('✅ Database connected successfully');
-  
-  // Optional: Test a simple query
-  const count = await prisma.waitlist.count();
-  console.log(`📊 Waitlist entries: ${count}`);
-} catch (error) {
-  console.error('❌ Database connection failed:', error);
-  process.exit(1);
-}
 
 app.use('/waitlist', waitlistRoutes);
 app.use('/providers', providersRoutes);

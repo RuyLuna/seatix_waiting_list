@@ -1,12 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 const router = express.Router();
-import * as db from '../db/sqlite.js';
 import { client } from '../cache/redis.js';
 import { ticketQueue } from '../queue/ticketQueue.js';
 import { acceptOffer, getOffer } from '../utils/offers.js';
 import { validateApiKey, requireRole } from '../middleware/apiKeyAuth.js';
 import crypto from 'crypto';
-import sqlite3 from 'sqlite3';
 import type { 
   WaitlistEntry, 
   CreateWaitlistBody, 
@@ -38,25 +36,28 @@ const api_working = async (req: Request, res: Response): Promise<void> => {
 const create_waitlist_entry = async (req: Request, res: Response): Promise<void> => {
   try {
     console.log("Received waitlist request:", req.params.eventId, req.body);
-    const { eventId } = req.params;
+    const { eventId } = req.params as { eventId: string };
     const { user_id, zones_preferred, quantity_wanted } = req.body as CreateWaitlistBody;
     
     if (!user_id || !zones_preferred || !quantity_wanted) {
       res.status(400).json({ error: 'user_id, zones_preferred, and quantity_wanted are required' });
       return;
     }
-
-    const database = db.getDb();
     
     // Check if user already has an active entry for these zones (waiting or notified)
-    const activeEntry = await new Promise<WaitlistEntry | undefined>((resolve, reject) => {
-      database.get(
-        `SELECT entry_id, status FROM waitlist 
-         WHERE event_id = ? AND user_id = ? AND zones_preferred = ? 
-         AND status IN ('waiting', 'notified')`,
-        [eventId, user_id, JSON.stringify(zones_preferred)],
-        (err: Error | null, row: WaitlistEntry | undefined) => err ? reject(err) : resolve(row)
-      );
+    const activeEntry = await prisma.waitlist.findFirst({
+      where: {
+        eventId: eventId,
+        userId: user_id,
+        zonesPreferred: JSON.stringify(zones_preferred),
+        status: {
+          in: ['waiting', 'notified']
+        }
+      },
+      select: {
+        entryId: true,
+        status: true
+      }
     });
 
     if (activeEntry) {
@@ -70,19 +71,18 @@ const create_waitlist_entry = async (req: Request, res: Response): Promise<void>
     
     // Create new entry (even if user previously had 'accepted' status - keep old record for audit)
     const entry_id = crypto.randomUUID();
-    await new Promise<sqlite3.RunResult>((resolve, reject) => {
-      database.run(
-        `INSERT INTO waitlist (entry_id, event_id, user_id, zones_preferred, quantity_wanted, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'waiting', datetime('now'))`,
-        [entry_id, eventId, user_id, JSON.stringify(zones_preferred), quantity_wanted],
-        function(this: sqlite3.RunResult, err: Error | null) {
-          if (err) reject(err);
-          else resolve(this);
-        }
-      );
+    await prisma.waitlist.create({
+      data: {
+        entryId: entry_id,
+        eventId: eventId,
+        userId: user_id,
+        zonesPreferred: JSON.stringify(zones_preferred),
+        quantityWanted: quantity_wanted,
+        status: 'waiting'
+      }
     });
     
-    // Only add to Redis if SQLite insert was successful
+    // Only add to Redis if Prisma insert was successful
     // Store as "userId:quantity" to enable quantity-based filtering during ticket release
     const positions: Positions = {};
     const redisValue = `${user_id}:${quantity_wanted}`;
@@ -110,23 +110,27 @@ const create_waitlist_entry = async (req: Request, res: Response): Promise<void>
 
 const get_waitlist_me = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { eventId } = req.params;
+    const { eventId } = req.params as { eventId: string };
     const userId = req.headers['x-user-id'] as string;
     
     if (!userId) {
       res.status(400).json({ error: 'x-user-id header is required' });
       return;
     }
-
-    const database = db.getDb();
     
-    // Get user's waitlist entry from SQLite
-    const userEntry = await new Promise<WaitlistEntry[]>((resolve, reject) => {
-      database.all(
-        'SELECT entry_id, zones_preferred, quantity_wanted, status, created_at FROM waitlist WHERE event_id = ? AND user_id = ?',
-        [eventId, userId],
-        (err: Error | null, rows: WaitlistEntry[]) => err ? reject(err) : resolve(rows)
-      );
+    // Get user's waitlist entry from Prisma
+    const userEntry = await prisma.waitlist.findMany({
+      where: {
+        eventId: eventId,
+        userId: userId
+      },
+      select: {
+        entryId: true,
+        zonesPreferred: true,
+        quantityWanted: true,
+        status: true,
+        createdAt: true
+      }
     });
     
     if (!userEntry || userEntry.length === 0) {
@@ -137,7 +141,7 @@ const get_waitlist_me = async (req: Request, res: Response): Promise<void> => {
     const entriesWithPositions: any[] = [];
 
     for (const entry of userEntry) {
-      const zonesPreferred: string[] = JSON.parse(entry.zones_preferred);
+      const zonesPreferred: string[] = JSON.parse(entry.zonesPreferred);
       const positions: Positions = {};
 
       // Get user's position in each zone queue from Redis
@@ -156,12 +160,12 @@ const get_waitlist_me = async (req: Request, res: Response): Promise<void> => {
       }
 
       entriesWithPositions.push({
-        entry_id: entry.entry_id,
+        entry_id: entry.entryId,
         positions,
         zones_preferred: zonesPreferred,
-        quantity_wanted: entry.quantity_wanted,
+        quantity_wanted: entry.quantityWanted,
         status: entry.status,
-        created_at: entry.created_at
+        created_at: entry.createdAt
       });
     }
 
@@ -176,23 +180,23 @@ const get_waitlist_me = async (req: Request, res: Response): Promise<void> => {
 
 const delete_waitlist_me = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { eventId } = req.params;
+    const { eventId } = req.params as { eventId: string };
     const userId = req.headers['x-user-id'] as string;
     
     if (!userId) {
       res.status(400).json({ error: 'x-user-id header is required' });
       return;
     }
-
-    const database = db.getDb();
     
     // Get user's zones_preferred before deleting
-    const userEntry = await new Promise<WaitlistEntry | undefined>((resolve, reject) => {
-      database.get(
-        'SELECT zones_preferred FROM waitlist WHERE event_id = ? AND user_id = ?',
-        [eventId, userId],
-        (err: Error | null, row: WaitlistEntry | undefined) => err ? reject(err) : resolve(row)
-      );
+    const userEntry = await prisma.waitlist.findFirst({
+      where: {
+        eventId: eventId,
+        userId: userId
+      },
+      select: {
+        zonesPreferred: true
+      }
     });
 
     if (!userEntry) {
@@ -200,7 +204,7 @@ const delete_waitlist_me = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const zonesPreferred: string[] = JSON.parse(userEntry.zones_preferred);
+    const zonesPreferred: string[] = JSON.parse(userEntry.zonesPreferred);
     
     // Remove user from ALL zone queues in Redis
     // Need to remove entries matching userId (format: "userId:quantity")
@@ -215,16 +219,12 @@ const delete_waitlist_me = async (req: Request, res: Response): Promise<void> =>
       }
     }
     
-    // Delete user's waitlist entry from SQLite
-    await new Promise<number>((resolve, reject) => {
-      database.run(
-        'DELETE FROM waitlist WHERE event_id = ? AND user_id = ?',
-        [eventId, userId],
-        function(this: sqlite3.RunResult, err: Error | null) {
-          if (err) reject(err);
-          else resolve(this.changes);
-        }
-      );
+    // Delete user's waitlist entry from database
+    await prisma.waitlist.deleteMany({
+      where: {
+        eventId: eventId,
+        userId: userId
+      }
     });
     
     res.json({
@@ -239,7 +239,7 @@ const delete_waitlist_me = async (req: Request, res: Response): Promise<void> =>
 
 const release_tickets = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { eventId } = req.params;
+    const { eventId } = req.params as { eventId: string };
     const { zones, reason = 'cancellation' } = req.body as ReleaseTicketsBody;
 
     if (!zones || typeof zones !== 'object') {
@@ -307,23 +307,18 @@ const accept_offer = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Update SQLite status to 'accepted' (offer was successfully used)
-    const database = db.getDb();
-    await new Promise<number>((resolve, reject) => {
-      database.run(
-        'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
-        ['accepted', result.event_id, result.user_id],
-        function(this: sqlite3.RunResult, err: Error | null) {
-          if (err) {
-            console.error('Error updating status to accepted:', err);
-            reject(err);
-          } else {
-            console.log(`[Offer] Updated user ${result.user_id} status to 'accepted'`);
-            resolve(this.changes);
-          }
-        }
-      );
+    // Update Prisma status to 'accepted' (offer was successfully used)
+    await prisma.waitlist.updateMany({
+      where: {
+        eventId: result.event_id,
+        userId: result.user_id
+      },
+      data: {
+        status: 'accepted'
+      }
     });
+    
+    console.log(`[Offer] Updated user ${result.user_id} status to 'accepted'`);
 
     // Offer accepted successfully
     res.json(result);

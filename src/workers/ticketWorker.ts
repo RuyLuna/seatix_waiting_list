@@ -1,8 +1,7 @@
 import { Worker, Job } from 'bullmq';
-import * as db from '../db/sqlite.js';
 import { client } from '../cache/redis.js';
 import { createOffer } from '../utils/offers.js';
-import sqlite3 from 'sqlite3';
+import { prisma } from '../db/prisma.js';
 import type { 
   RedisConnection, 
   TicketReleaseJobData, 
@@ -31,7 +30,7 @@ const connection: RedisConnection = parseRedisUrl(REDIS_URL);
  * 2. Check each user's quantity_wanted against available tickets
  * 3. Only notify users if available tickets >= quantity_wanted
  * 4. Skip users who need more tickets (keep them in queue)
- * 5. Update SQLite status to 'notified' for selected users
+ * 5. Update database status to 'notified' for selected users
  */
 async function processTicketRelease(job: Job<TicketReleaseJobData>): Promise<TicketReleaseResult> {
   const { event_id, zones, reason } = job.data;
@@ -86,17 +85,15 @@ async function processTicketRelease(job: Job<TicketReleaseJobData>): Promise<Tic
           
           ticketsRemaining -= quantityWanted;
 
-          // Update SQLite to mark user as notified
-          const database = db.getDb();
-          await new Promise<number>((resolve, reject) => {
-            database.run(
-              'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
-              ['notified', event_id, userId],
-              function(this: sqlite3.RunResult, err: Error | null) {
-                if (err) reject(err);
-                else resolve(this.changes);
-              }
-            );
+          // Update database to mark user as notified
+          await prisma.waitlist.updateMany({
+            where: {
+              eventId: event_id,
+              userId: userId
+            },
+            data: {
+              status: 'notified'
+            }
           });
 
           console.log(`[Worker] Notified user ${userId} for zone ${zone} (offer token: ${offer.token})`);

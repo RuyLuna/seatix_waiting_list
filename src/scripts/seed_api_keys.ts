@@ -1,5 +1,4 @@
-import * as db from '../db/sqlite.js';
-import sqlite3 from 'sqlite3';
+import { prisma } from '../db/prisma.js';
 
 // Interface for test API key structure
 interface TestApiKey {
@@ -7,11 +6,6 @@ interface TestApiKey {
   key_value: string;
   role: 'user' | 'promoter' | 'admin';
   event_id: string | null;
-}
-
-// Interface for existing key row
-interface ExistingKeyRow {
-  id: number;
 }
 
 /**
@@ -23,8 +17,6 @@ interface ExistingKeyRow {
  */
 async function seedApiKeys(): Promise<void> {
   try {
-    const database = db.getDb();
-
     const testKeys: TestApiKey[] = [
       {
         name: 'Test User',
@@ -54,34 +46,43 @@ async function seedApiKeys(): Promise<void> {
 
     for (const key of testKeys) {
       // Check if key already exists
-      const existing = await new Promise<ExistingKeyRow | undefined>((resolve, reject) => {
-        database.get(
-          'SELECT id FROM api_keys WHERE key_value = ?',
-          [key.key_value],
-          (err: Error | null, row: ExistingKeyRow | undefined) => err ? reject(err) : resolve(row)
-        );
+      const existing = await prisma.apiKey.findFirst({
+        where: {
+          keyValue: key.key_value
+        },
+        select: {
+          id: true
+        }
       });
 
       if (!existing) {
-        await new Promise<sqlite3.RunResult>((resolve, reject) => {
-          database.run(
-            'INSERT INTO api_keys (name, key_value, role, event_id, active) VALUES (?, ?, ?, ?, 1)',
-            [key.name, key.key_value, key.role, key.event_id],
-            function(this: sqlite3.RunResult, err: Error | null) {
-              if (err) reject(err);
-              else {
-                console.log(`[Seed] Created API key: ${key.name} (${key.role})`);
-                resolve(this);
-              }
-            }
-          );
+        await prisma.apiKey.create({
+          data: {
+            name: key.name,
+            keyValue: key.key_value,
+            role: key.role,
+            eventId: key.event_id,
+            active: 1
+          }
         });
+        console.log(`[Seed] Created API key: ${key.name} (${key.role})`);
       } else {
         console.log(`[Seed] API key already exists: ${key.name}`);
       }
     }
 
     console.log('[Seed] API keys seeded successfully');
+    // Print all of the api keys for reference
+    const allKeys = await prisma.apiKey.findMany({
+      select: {
+        name: true,
+        keyValue: true,
+        role: true,
+        eventId: true,
+        active: true
+      }
+    });
+    console.table(allKeys);
   } catch (err) {
     console.error('[Seed] Error seeding API keys:', (err as Error).message);
     throw err;
@@ -89,9 +90,7 @@ async function seedApiKeys(): Promise<void> {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const sqlite = await import('../db/sqlite.js');
-  sqlite.initDb()
-    .then(() => seedApiKeys())
+  seedApiKeys()
     .then(() => {
       console.log('Seeding complete');
       process.exit(0);

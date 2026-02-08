@@ -1,7 +1,6 @@
 import { beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { client } from '../dist/cache/redis.js';
-import * as db from '../dist/db/sqlite.js';
-import initDb from '../dist/scripts/init_db.js';
+import { prisma } from '../dist/db/prisma.js';
 
 /**
  * Global test setup
@@ -12,14 +11,15 @@ import initDb from '../dist/scripts/init_db.js';
 beforeAll(async () => {
   console.log('[Test Setup] Initializing test environment...');
   
-  // Initialize database first
-  await initDb();
-  console.log('[Test Setup] Database initialized');
+  // Connect to Prisma (MySQL)
+  await prisma.$connect();
+  console.log('[Test Setup] Database connected');
   
   // Wait for Redis connection
   if (!client.isOpen) {
     await client.connect();
   }
+  console.log('[Test Setup] Redis connected');
   
   console.log('[Test Setup] Test environment ready');
 });
@@ -33,11 +33,8 @@ afterAll(async () => {
     await client.quit();
   }
   
-  // Close SQLite connection
-  const database = db.getDb();
-  if (database) {
-    database.close();
-  }
+  // Disconnect Prisma
+  await prisma.$disconnect();
   
   console.log('[Test Teardown] Cleanup complete');
 });

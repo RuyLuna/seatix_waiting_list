@@ -33,7 +33,7 @@ npm test tests/integration/waitlist.test.mjs
 
 ## Test Environment
 
-- **Database**: Uses the same SQLite database configured in `.env` or `SQLITE_PATH`
+- **Database**: Uses MySQL with Prisma ORM configured via `DATABASE_URL` in `.env`
 - **Redis**: Connects to the Redis instance configured in `.env` or `REDIS_URL`
 - **Sequential Execution**: Tests run sequentially with `singleFork: true` to avoid database conflicts
 - **Isolation**: Use `cleanWaitlistData()` helper to reset state between tests
@@ -76,9 +76,7 @@ describe('Waitlist API', () => {
 
 ### testUtils.js
 
-- `cleanWaitlistData(eventId)` - Clean test data from SQLite and Redis
-- `createTestApiKey(name, role, allowedEvents)` - Create API key for testing
-- `cleanTestApiKeys(prefix)` - Remove test API keys
+- `cleanWaitlistData(eventId)` - Clean test data from MySQL/Prisma and Redis
 - `getWaitlistCount(eventId, status)` - Count waitlist entries
 - `getQueueLength(eventId, zone)` - Get Redis queue length
 - `generateUserId()` - Generate random user ID
@@ -93,6 +91,7 @@ describe('Waitlist API', () => {
 ## Notes
 
 - Tests clean up after themselves using `cleanWaitlistData()`
-- API keys created with `test-` prefix can be bulk-deleted with `cleanTestApiKeys()`
 - Use `generateUserId()` and `generateEventId()` to avoid collisions
-- SQLite and Redis connections are managed in `setup.js`
+- MySQL/Prisma and Redis connections are managed in `setup.mjs`
+- Ensure MySQL is running before executing tests (via Docker or local installation)
+- Test database should be separate from development database to avoid data loss

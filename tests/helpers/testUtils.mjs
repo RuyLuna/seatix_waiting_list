@@ -1,30 +1,24 @@
 import { client } from '../../dist/cache/redis.js';
-import * as db from '../../dist/db/sqlite.js';
+import { prisma } from '../../dist/db/prisma.js';
 
 /**
  * Test utility functions for integration tests
  */
 
 /**
- * Clean all waitlist data from Redis and SQLite
+ * Clean all waitlist data from Redis and MySQL/Prisma
  * @param {string} eventId - Optional event ID to clean specific event
  */
 export async function cleanWaitlistData(eventId = null) {
-  const database = db.getDb();
-  
-  // Clean SQLite
+  // Clean MySQL using Prisma
   if (eventId) {
-    await new Promise((resolve, reject) => {
-      database.run('DELETE FROM waitlist WHERE event_id = ?', [eventId], 
-        err => err ? reject(err) : resolve()
-      );
+    await prisma.waitlist.deleteMany({
+      where: {
+        eventId: eventId
+      }
     });
   } else {
-    await new Promise((resolve, reject) => {
-      database.run('DELETE FROM waitlist', [], 
-        err => err ? reject(err) : resolve()
-      );
-    });
+    await prisma.waitlist.deleteMany();
   }
   
   // Clean Redis queues
@@ -51,20 +45,11 @@ export async function cleanWaitlistData(eventId = null) {
  * @returns {Promise<number>}
  */
 export async function getWaitlistCount(eventId, status = null) {
-  const database = db.getDb();
+  const where = status 
+    ? { eventId: eventId, status: status }
+    : { eventId: eventId };
   
-  const query = status
-    ? 'SELECT COUNT(*) as count FROM waitlist WHERE event_id = ? AND status = ?'
-    : 'SELECT COUNT(*) as count FROM waitlist WHERE event_id = ?';
-  
-  const params = status ? [eventId, status] : [eventId];
-  
-  return new Promise((resolve, reject) => {
-    database.get(query, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row.count);
-    });
-  });
+  return await prisma.waitlist.count({ where });
 }
 
 /**

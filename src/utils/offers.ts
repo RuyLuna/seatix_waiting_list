@@ -1,13 +1,14 @@
 import crypto from 'crypto';
 import { client } from '../cache/redis.js';
+import type { OfferData, CreateOfferResult, AcceptOfferResult } from '../types/index.js';
 
-const OFFER_TTL_MINUTES = parseInt(process.env.OFFER_TTL_MINUTES || '10');
-const OFFER_TTL_SECONDS = OFFER_TTL_MINUTES * 60;
+const OFFER_TTL_MINUTES: number = parseInt(process.env.OFFER_TTL_MINUTES || '10');
+const OFFER_TTL_SECONDS: number = OFFER_TTL_MINUTES * 60;
 
 /**
  * Generate a random alphanumeric token for ticket offers
  */
-function generateOfferToken() {
+function generateOfferToken(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
@@ -16,12 +17,17 @@ function generateOfferToken() {
  * Stores offer data with expiration time
  * Also stores metadata in non-expiring key for expiry tracking
  */
-async function createOffer(eventId, userId, zone, ticketsAllocated) {
-  const token = generateOfferToken();
-  const offerKey = `offer:${token}`;
-  const metaKey = `offer:${token}:meta`;
+async function createOffer(
+  eventId: string,
+  userId: string,
+  zone: string,
+  ticketsAllocated: number
+): Promise<CreateOfferResult> {
+  const token: string = generateOfferToken();
+  const offerKey: string = `offer:${token}`;
+  const metaKey: string = `offer:${token}:meta`;
   
-  const offerData = JSON.stringify({
+  const offerData: string = JSON.stringify({
     event_id: eventId,
     user_id: userId,
     zone: zone,
@@ -48,9 +54,9 @@ async function createOffer(eventId, userId, zone, ticketsAllocated) {
  * Retrieve offer from Redis
  * Returns null if offer has expired or doesn't exist
  */
-async function getOffer(token) {
-  const offerKey = `offer:${token}`;
-  const offerData = await client.get(offerKey);
+async function getOffer(token: string): Promise<OfferData | null> {
+  const offerKey: string = `offer:${token}`;
+  const offerData: string | null = await client.get(offerKey);
   
   if (!offerData) {
     return null;
@@ -69,10 +75,10 @@ async function getOffer(token) {
  * Returns null if offer doesn't exist/expired
  * Also cleans up metadata key
  */
-async function acceptOffer(token) {
-  const offerKey = `offer:${token}`;
-  const metaKey = `offer:${token}:meta`;
-  const offerData = await client.get(offerKey);
+async function acceptOffer(token: string): Promise<AcceptOfferResult | null> {
+  const offerKey: string = `offer:${token}`;
+  const metaKey: string = `offer:${token}:meta`;
+  const offerData: string | null = await client.get(offerKey);
   
   if (!offerData) {
     return null; // Offer expired or not found
@@ -83,10 +89,10 @@ async function acceptOffer(token) {
   await client.del(metaKey);
   
   try {
-    const offer = JSON.parse(offerData);
+    const offer: OfferData = JSON.parse(offerData);
     
     // Generate a checkout URL (in real implementation, would integrate with checkout service)
-    const checkoutUrl = `https://seatix.com/checkout/${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+    const checkoutUrl: string = `https://seatix.com/checkout/${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
     
     return {
       success: true,
@@ -98,7 +104,7 @@ async function acceptOffer(token) {
       user_id: offer.user_id
     };
   } catch (err) {
-    console.error(`[Offer] Error accepting offer ${token}:`, err);
+    console.error(`[Offer] Error accepting offer ${token}:`, (err as Error).message);
     return null;
   }
 }

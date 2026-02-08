@@ -1,10 +1,10 @@
 import { Queue } from 'bullmq';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const REDIS_URL: String = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
 // Parse Redis URL to extract connection options
-const parseRedisUrl = (url) => {
-  const urlObj = new URL(url);
+const parseRedisUrl = (url: String) => {
+  const urlObj = new URL(url.toString());
   return {
     host: urlObj.hostname,
     port: parseInt(urlObj.port) || 6379,

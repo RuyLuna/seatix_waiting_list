@@ -1,18 +1,30 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { Request, Response, NextFunction } from 'express';
+import type { ApiKeyInfo } from '../types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
+// Extend Express Request to include apiKeyInfo
+declare global {
+  namespace Express {
+    interface Request {
+      apiKeyInfo?: ApiKeyInfo;
+    }
+  }
+}
+
 // Validate API key from headers
-async function validateApiKey(req, res, next) {
+async function validateApiKey(req: Request, res: Response, next: NextFunction) {
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
-    return res.status(401).json({ error: 'Missing X-API-Key header' });
+    res.status(401).json({ error: 'Missing X-API-Key header' });
+    return;
   }
 
   try {
@@ -22,16 +34,18 @@ async function validateApiKey(req, res, next) {
     db.get(
       'SELECT id, name, role, event_id FROM api_keys WHERE key_value = ? AND active = 1',
       [apiKey],
-      (err, row) => {
+      (err: Error | null, row: ApiKeyInfo | undefined) => {
         db.close();
 
         if (err) {
           console.error('Error validating API key:', err);
-          return res.status(500).json({ error: 'Internal server error' });
+          res.status(500).json({ error: 'Internal server error' });
+          return;
         }
 
         if (!row) {
-          return res.status(403).json({ error: 'Invalid API key' });
+          res.status(403).json({ error: 'Invalid API key' });
+          return;
         }
 
         // Attach API key info to request
@@ -46,25 +60,28 @@ async function validateApiKey(req, res, next) {
 }
 
 // Check if user has permission for specific endpoint
-function requireRole(...allowedRoles) {
-  return (req, res, next) => {
+function requireRole(...allowedRoles: string[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.apiKeyInfo) {
-      return res.status(401).json({ error: 'Authentication required' });
+      res.status(401).json({ error: 'Authentication required' });
+      return;
     }
 
     const { role } = req.apiKeyInfo;
 
     // Admin has access to everything
     if (role === 'admin') {
-      return next();
+      next();
+      return;
     }
 
     // Check if user's role is in allowed roles
     if (allowedRoles.includes(role)) {
-      return next();
+      next();
+      return;
     }
 
-    return res.status(403).json({ 
+    res.status(403).json({ 
       error: 'Insufficient permissions',
       detail: `This endpoint requires one of these roles: ${allowedRoles.join(', ')}`
     });
@@ -72,16 +89,18 @@ function requireRole(...allowedRoles) {
 }
 
 // Check if promoter owns the event
-function requireEventOwnership(req, res, next) {
+function requireEventOwnership(req: Request, res: Response, next: NextFunction): void {
   if (!req.apiKeyInfo) {
-    return res.status(401).json({ error: 'Authentication required' });
+    res.status(401).json({ error: 'Authentication required' });
+    return;
   }
 
   const { role, event_id } = req.apiKeyInfo;
 
   // Admin can access any event
   if (role === 'admin') {
-    return next();
+    next();
+    return;
   }
 
   // Promoter must own this event
@@ -89,20 +108,22 @@ function requireEventOwnership(req, res, next) {
     const requestedEventId = req.params.eventId;
     
     if (event_id === requestedEventId) {
-      return next();
+      next();
+      return;
     }
 
-    return res.status(403).json({ 
+    res.status(403).json({ 
       error: 'You do not have permission to access this event',
       detail: 'Promoters can only access their own events'
     });
+    return;
   }
 
-  return res.status(403).json({ error: 'Insufficient permissions' });
+  res.status(403).json({ error: 'Insufficient permissions' });
 }
 
 // Utility function to create/add an API key
-async function addApiKey(name) {
+async function addApiKey(name: string): Promise<{ id: number; name: string }> {
   return new Promise((resolve, reject) => {
     const sqlite = sqlite3.verbose();
     const db = new sqlite.Database(DB_PATH);
@@ -110,7 +131,7 @@ async function addApiKey(name) {
     db.run(
       'INSERT INTO api_keys (name, active) VALUES (?, 1)',
       [name],
-      function(err) {
+      function(this: sqlite3.RunResult, err: Error | null) {
         db.close();
         if (err) reject(err);
         else resolve({ id: this.lastID, name: name });

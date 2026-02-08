@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 const router = express.Router();
 import * as db from '../db/sqlite.js';
 import { client } from '../cache/redis.js';
@@ -6,56 +6,66 @@ import { ticketQueue } from '../queue/ticketQueue.js';
 import { acceptOffer, getOffer } from '../utils/offers.js';
 import { validateApiKey, requireRole } from '../middleware/apiKeyAuth.js';
 import crypto from 'crypto';
+import sqlite3 from 'sqlite3';
+import type { 
+  WaitlistEntry, 
+  CreateWaitlistBody, 
+  ReleaseTicketsBody, 
+  Positions 
+} from '../types/index.js';
 
-const api_working = async (req, res) => {
+const api_working = async (req: Request, res: Response): Promise<void> => {
   try {
     res.json({
         success: true
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const error = err as Error;
+    res.status(500).json({ error: error.message });
   }
 };
 
-const create_waitlist_entry = async (req, res) => {
+const create_waitlist_entry = async (req: Request, res: Response): Promise<void> => {
   try {
     console.log("Received waitlist request:", req.params.eventId, req.body);
     const { eventId } = req.params;
-    const { user_id, zones_preferred, quantity_wanted } = req.body;
+    const { user_id, zones_preferred, quantity_wanted } = req.body as CreateWaitlistBody;
     
     if (!user_id || !zones_preferred || !quantity_wanted) {
-      return res.status(400).json({ error: 'user_id, zones_preferred, and quantity_wanted are required' });
+      res.status(400).json({ error: 'user_id, zones_preferred, and quantity_wanted are required' });
+      return;
     }
 
     const database = db.getDb();
     
     // Check if user already has an active entry for these zones (waiting or notified)
-    const activeEntry = await new Promise((resolve, reject) => {
+    const activeEntry = await new Promise<WaitlistEntry | undefined>((resolve, reject) => {
       database.get(
         `SELECT entry_id, status FROM waitlist 
          WHERE event_id = ? AND user_id = ? AND zones_preferred = ? 
          AND status IN ('waiting', 'notified')`,
         [eventId, user_id, JSON.stringify(zones_preferred)],
-        (err, row) => err ? reject(err) : resolve(row)
+        (err: Error | null, row: WaitlistEntry | undefined) => err ? reject(err) : resolve(row)
       );
     });
 
     if (activeEntry) {
       // User is already in the waitlist or has a pending offer
-      return res.status(409).json({ 
+      res.status(409).json({ 
         error: 'Ya estás registrado en la lista de espera para estas zonas en este evento',
         detail: 'User already registered for these zones in this event'
       });
+      return;
     }
     
     // Create new entry (even if user previously had 'accepted' status - keep old record for audit)
     const entry_id = crypto.randomUUID();
-    await new Promise((resolve, reject) => {
+    await new Promise<sqlite3.RunResult>((resolve, reject) => {
       database.run(
         `INSERT INTO waitlist (entry_id, event_id, user_id, zones_preferred, quantity_wanted, status, created_at)
          VALUES (?, ?, ?, ?, ?, 'waiting', datetime('now'))`,
         [entry_id, eventId, user_id, JSON.stringify(zones_preferred), quantity_wanted],
-        function(err) {
+        function(this: sqlite3.RunResult, err: Error | null) {
           if (err) reject(err);
           else resolve(this);
         }
@@ -64,7 +74,7 @@ const create_waitlist_entry = async (req, res) => {
     
     // Only add to Redis if SQLite insert was successful
     // Store as "userId:quantity" to enable quantity-based filtering during ticket release
-    const positions = {};
+    const positions: Positions = {};
     const redisValue = `${user_id}:${quantity_wanted}`;
     for (const zone of zones_preferred) {
       const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
@@ -83,47 +93,50 @@ const create_waitlist_entry = async (req, res) => {
       created_at: new Date().toISOString()
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const error = err as Error;
+    res.status(500).json({ error: error.message });
   }
 };
 
-const get_waitlist_me = async (req, res) => {
+const get_waitlist_me = async (req: Request, res: Response): Promise<void> => {
   try {
     const { eventId } = req.params;
-    const userId = req.headers['x-user-id'];
+    const userId = req.headers['x-user-id'] as string;
     
     if (!userId) {
-      return res.status(400).json({ error: 'x-user-id header is required' });
+      res.status(400).json({ error: 'x-user-id header is required' });
+      return;
     }
 
     const database = db.getDb();
     
     // Get user's waitlist entry from SQLite
-    const userEntry = await new Promise((resolve, reject) => {
+    const userEntry = await new Promise<WaitlistEntry[]>((resolve, reject) => {
       database.all(
         'SELECT entry_id, zones_preferred, quantity_wanted, status, created_at FROM waitlist WHERE event_id = ? AND user_id = ?',
         [eventId, userId],
-        (err, row) => err ? reject(err) : resolve(row)
+        (err: Error | null, rows: WaitlistEntry[]) => err ? reject(err) : resolve(rows)
       );
     });
     
     if (!userEntry || userEntry.length === 0) {
-      return res.status(404).json({ error: 'User not found in waitlist for this event' });
+      res.status(404).json({ error: 'User not found in waitlist for this event' });
+      return;
     }
 
-    const entriesWithPositions = [];
+    const entriesWithPositions: any[] = [];
 
     for (const entry of userEntry) {
-      const zonesPreferred = JSON.parse(entry.zones_preferred);
-      const positions = {};
+      const zonesPreferred: string[] = JSON.parse(entry.zones_preferred);
+      const positions: Positions = {};
 
       // Get user's position in each zone queue from Redis
       for (const zone of zonesPreferred) {
         const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
         // Get all users in queue and find this user's position
-        const queue = await client.lRange(queueKey, 0, -1);
+        const queue: string[] = await client.lRange(queueKey, 0, -1);
         // Parse userId from "userId:quantity" format
-        const position = queue.findIndex(entry => entry.split(':')[0] === userId);
+        const position: number = queue.findIndex((entry: string) => entry.split(':')[0] === userId);
         if (position !== -1) {
           // Position is from end (FIFO: first in = last in list), convert to 1-based from front
           positions[zone] = queue.length - position;
@@ -146,41 +159,44 @@ const get_waitlist_me = async (req, res) => {
       entries: entriesWithPositions
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const error = err as Error;
+    res.status(500).json({ error: error.message });
   }
 };
 
-const delete_waitlist_me = async (req, res) => {
+const delete_waitlist_me = async (req: Request, res: Response): Promise<void> => {
   try {
     const { eventId } = req.params;
-    const userId = req.headers['x-user-id'];
+    const userId = req.headers['x-user-id'] as string;
     
     if (!userId) {
-      return res.status(400).json({ error: 'x-user-id header is required' });
+      res.status(400).json({ error: 'x-user-id header is required' });
+      return;
     }
 
     const database = db.getDb();
     
     // Get user's zones_preferred before deleting
-    const userEntry = await new Promise((resolve, reject) => {
+    const userEntry = await new Promise<WaitlistEntry | undefined>((resolve, reject) => {
       database.get(
         'SELECT zones_preferred FROM waitlist WHERE event_id = ? AND user_id = ?',
         [eventId, userId],
-        (err, row) => err ? reject(err) : resolve(row)
+        (err: Error | null, row: WaitlistEntry | undefined) => err ? reject(err) : resolve(row)
       );
     });
 
     if (!userEntry) {
-      return res.status(404).json({ error: 'User not found in waitlist for this event' });
+      res.status(404).json({ error: 'User not found in waitlist for this event' });
+      return;
     }
 
-    const zonesPreferred = JSON.parse(userEntry.zones_preferred);
+    const zonesPreferred: string[] = JSON.parse(userEntry.zones_preferred);
     
     // Remove user from ALL zone queues in Redis
     // Need to remove entries matching userId (format: "userId:quantity")
     for (const zone of zonesPreferred) {
       const queueKey = `waitlist:event:${eventId}:zone:${zone}`;
-      const queue = await client.lRange(queueKey, 0, -1);
+      const queue: string[] = await client.lRange(queueKey, 0, -1);
       // Find and remove all entries for this user
       for (const entry of queue) {
         if (entry.split(':')[0] === userId) {
@@ -190,11 +206,11 @@ const delete_waitlist_me = async (req, res) => {
     }
     
     // Delete user's waitlist entry from SQLite
-    await new Promise((resolve, reject) => {
+    await new Promise<number>((resolve, reject) => {
       database.run(
         'DELETE FROM waitlist WHERE event_id = ? AND user_id = ?',
         [eventId, userId],
-        function(err) {
+        function(this: sqlite3.RunResult, err: Error | null) {
           if (err) reject(err);
           else resolve(this.changes);
         }
@@ -206,23 +222,26 @@ const delete_waitlist_me = async (req, res) => {
       message: 'Has sido removido de la lista de espera'
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const error = err as Error;
+    res.status(500).json({ error: error.message });
   }
 };
 
-const release_tickets = async (req, res) => {
+const release_tickets = async (req: Request, res: Response): Promise<void> => {
   try {
     const { eventId } = req.params;
-    const { zones, reason = 'cancellation' } = req.body;
+    const { zones, reason = 'cancellation' } = req.body as ReleaseTicketsBody;
 
     if (!zones || typeof zones !== 'object') {
-      return res.status(400).json({ error: 'zones object is required (e.g., { "VIP": 5, "General": 10 })' });
+      res.status(400).json({ error: 'zones object is required (e.g., { "VIP": 5, "General": 10 })' });
+      return;
     }
 
     if (!['cancellation', 'refund', 'courtesy_expired'].includes(reason)) {
-      return res.status(400).json({ 
+      res.status(400).json({ 
         error: 'reason must be one of: cancellation, refund, courtesy_expired' 
       });
+      return;
     }
 
     // Add job to the queue instead of processing directly
@@ -250,17 +269,19 @@ const release_tickets = async (req, res) => {
     });
   } catch (err) {
     console.error('Error in release-tickets:', err);
-    res.status(500).json({ error: err.message });
+    const error = err as Error;
+    res.status(500).json({ error: error.message });
   }
 };
 
 // Offer acceptance endpoint
-const accept_offer = async (req, res) => {
+const accept_offer = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { token } = req.params;
+    const token = req.params.token as string;
 
     if (!token) {
-      return res.status(400).json({ error: 'Token is required' });
+      res.status(400).json({ error: 'Token is required' });
+      return;
     }
 
     // Try to accept the offer
@@ -268,20 +289,21 @@ const accept_offer = async (req, res) => {
 
     if (!result) {
       // Offer expired or not found
-      return res.status(410).json({
+      res.status(410).json({
         success: false,
         error: 'offer_expired',
         message: 'Tu oportunidad expiró. Has sido regresado a la lista.'
       });
+      return;
     }
 
     // Update SQLite status to 'accepted' (offer was successfully used)
     const database = db.getDb();
-    await new Promise((resolve, reject) => {
+    await new Promise<number>((resolve, reject) => {
       database.run(
         'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
         ['accepted', result.event_id, result.user_id],
-        function(err) {
+        function(this: sqlite3.RunResult, err: Error | null) {
           if (err) {
             console.error('Error updating status to accepted:', err);
             reject(err);
@@ -297,7 +319,8 @@ const accept_offer = async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Error accepting offer:', err);
-    res.status(500).json({ error: err.message });
+    const error = err as Error;
+    res.status(500).json({ error: error.message });
   }
 };
 

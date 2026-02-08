@@ -1,18 +1,32 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 const router = express.Router();
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateApiKey, requireEventOwnership } from '../middleware/apiKeyAuth.js';
 import { client } from '../cache/redis.js';
+import type { WaitlistEntry, Positions } from '../types/index.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename: string = fileURLToPath(import.meta.url);
+const __dirname: string = path.dirname(__filename);
 
-const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
+const DB_PATH: string = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
+
+// Interface for zone queues
+interface ZoneQueues {
+  [zone: string]: string[];
+}
+
+// Interface for summary
+interface Summary {
+  total_waiting: number;
+  by_zone: {
+    [zone: string]: number;
+  };
+}
 
 // GET /providers/:eventId/waitlist - Requires API key and event ownership
-router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (req, res) => {
+router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (req: Request, res: Response) => {
   try {
     console.log("Received provider waitlist request for event:", req.params.eventId);
     const { eventId } = req.params;
@@ -21,7 +35,7 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     const db = new sqlite.Database(DB_PATH);
 
     // Get all waiting users from SQLite for this event
-    const rows = await new Promise((resolve, reject) => {
+    const rows = await new Promise<WaitlistEntry[]>((resolve, reject) => {
       db.all(
         `SELECT 
           entry_id, 
@@ -34,7 +48,7 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
          WHERE event_id = ? AND status = 'waiting'
          ORDER BY created_at ASC`,
         [eventId],
-        (err, rows) => {
+        (err: Error | null, rows: WaitlistEntry[]) => {
           db.close();
           if (err) reject(err);
           else resolve(rows);
@@ -43,13 +57,13 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     });
 
     // Get Redis queue data for each zone
-    const zoneQueues = {};
-    const allZones = new Set();
+    const zoneQueues: ZoneQueues = {};
+    const allZones = new Set<string>();
     
     // Collect all zones from user preferences
-    rows.forEach(row => {
-      const zones = JSON.parse(row.zones_preferred);
-      zones.forEach(zone => allZones.add(zone));
+    rows.forEach((row: WaitlistEntry) => {
+      const zones: string[] = JSON.parse(row.zones_preferred);
+      zones.forEach((zone: string) => allZones.add(zone));
     });
 
     // Fetch Redis queue for each zone
@@ -60,14 +74,14 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     }
 
     // Build entries with Redis positions
-    const entries = rows.map(row => {
-      const zones = JSON.parse(row.zones_preferred);
-      const positions = {};
+    const entries = rows.map((row: WaitlistEntry) => {
+      const zones: string[] = JSON.parse(row.zones_preferred);
+      const positions: Positions = {};
       
       // Get position in each zone queue from Redis
-      zones.forEach(zone => {
-        const queue = zoneQueues[zone] || [];
-        const index = queue.indexOf(row.user_id);
+      zones.forEach((zone: string) => {
+        const queue: string[] = zoneQueues[zone] || [];
+        const index: number = queue.indexOf(row.user_id || '');
         if (index !== -1) {
           // Convert to 1-based position from front (FIFO)
           positions[zone] = queue.length - index;
@@ -92,7 +106,7 @@ router.get('/:eventId/waitlist', validateApiKey, requireEventOwnership, async (r
     });
 
     // Calculate summary from Redis queues
-    const summary = {
+    const summary: Summary = {
       total_waiting: entries.length,
       by_zone: {}
     };

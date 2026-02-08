@@ -2,20 +2,21 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as sqlite from '../db/sqlite.js';
+import sqlite3 from 'sqlite3';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename: string = fileURLToPath(import.meta.url);
+const __dirname: string = path.dirname(__filename);
 
-const ensure = async () => {
-  const dbPath = sqlite.DB_PATH;
-  const dir = path.dirname(dbPath);
+const ensure = async (): Promise<void> => {
+  const dbPath: string = sqlite.DB_PATH;
+  const dir: string = path.dirname(dbPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   await sqlite.initDb();
-  const db = sqlite.getDb();
+  const db: sqlite3.Database = sqlite.getDb();
   
   // Wrap db.exec in a Promise since it's callback-based
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS waitlist (
         entry_id TEXT PRIMARY KEY,
@@ -42,7 +43,7 @@ const ensure = async () => {
         active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
-    `, (err) => {
+    `, (err: Error | null) => {
       if (err) reject(err);
       else resolve();
     });
@@ -52,7 +53,7 @@ const ensure = async () => {
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensure()
     .then(() => console.log('DB initialized'))
-    .catch((err) => {
+    .catch((err: Error) => {
       console.error(err);
       process.exit(1);
     });

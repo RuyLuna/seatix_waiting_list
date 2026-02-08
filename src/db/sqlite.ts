@@ -7,7 +7,7 @@ const __dirname = path.dirname(__filename);
 
 const DB_PATH = process.env.SQLITE_PATH || path.join(__dirname, '..', '..', 'data', 'waitlist.db');
 
-let db;
+let db: sqlite3.Database | null = null;
 
 // Initialize database connection
 function initDb() {
@@ -17,7 +17,7 @@ function initDb() {
       if (err) {
         console.error('Error opening database:', err.message);
         reject(err);
-      } else {
+      } else if(db){
         console.log('Connected to SQLite database at:', DB_PATH);
         // Enable foreign keys
         db.run('PRAGMA foreign_keys = ON');
@@ -28,7 +28,7 @@ function initDb() {
 }
 
 // Get database instance
-function getDb() {
+function getDb(): sqlite3.Database {
   if (!db) {
     throw new Error('Database not initialized. Call initDb() first.');
   }
@@ -38,8 +38,9 @@ function getDb() {
 // Get all waitlist entries
 function getAll() {
   return new Promise((resolve, reject) => {
+    const database = getDb();
     const query = 'SELECT id, name, email, created_at FROM waitlist ORDER BY created_at ASC';
-    db.all(query, [], (err, rows) => {
+    database.all(query, [], (err, rows) => {
       if (err) {
         reject(err);
       } else {
@@ -50,10 +51,11 @@ function getAll() {
 }
 
 // Add new waitlist entry
-function add({ name, email }) {
+function add({ name, email }: { name: string; email: string }): Promise<number> {
   return new Promise((resolve, reject) => {
+    const database = getDb();
     const query = 'INSERT INTO waitlist (name, email) VALUES (?, ?)';
-    db.run(query, [name, email], function(err) {
+    database.run(query, [name, email], function(err) {
       if (err) {
         reject(err);
       } else {
@@ -64,10 +66,11 @@ function add({ name, email }) {
 }
 
 // Remove waitlist entry
-function remove(id) {
+function remove(id: number): Promise<number> {
   return new Promise((resolve, reject) => {
+    const database = getDb();
     const query = 'DELETE FROM waitlist WHERE id = ?';
-    db.run(query, [id], function(err) {
+    database.run(query, [id], function(err) {
       if (err) {
         reject(err);
       } else {
@@ -78,7 +81,7 @@ function remove(id) {
 }
 
 // Close database connection gracefully
-function closeDb() {
+function closeDb(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (db) {
       db.close((err) => {

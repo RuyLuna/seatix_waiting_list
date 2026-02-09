@@ -70,19 +70,6 @@ async function seedApiKeys(): Promise<void> {
         console.log(`[Seed] API key already exists: ${key.name}`);
       }
     }
-
-    console.log('[Seed] API keys seeded successfully');
-    // Print all of the api keys for reference
-    const allKeys = await prisma.apiKey.findMany({
-      select: {
-        name: true,
-        keyValue: true,
-        role: true,
-        eventId: true,
-        active: true
-      }
-    });
-    console.table(allKeys);
   } catch (err) {
     console.error('[Seed] Error seeding API keys:', (err as Error).message);
     throw err;

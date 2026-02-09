@@ -11,14 +11,23 @@ tests/
 │   ├── testUtils.mjs      # Database and test data utilities
 │   └── apiClient.mjs      # API request helpers and endpoints
 └── integration/
-    ├── waitlist.test.mjs  # Tests for waitlist endpoints (to be created)
-    └── providers.test.mjs # Tests for provider endpoints (to be created)
+│   ├── waitlist.test.mjs  # Tests for waitlist endpoints
+│   └── providers.test.mjs # Tests for provider endpoints
+└── unit/
+    ├── utils/
+    │   └── offers.test.mjs          # Tests for offer utilities
+    ├── middleware/
+    │   └── apiKeyAuth.test.mjs      # Tests for auth middleware
+    ├── workers/
+    │   └── ticketWorker.test.mjs    # Tests for ticket release logic
+    └── scripts/
+        └── rebuild_redis_queues.test.mjs # Tests for queue rebuild
 ```
 
 ## Running Tests
 
 ```bash
-# Run all tests
+# Run all tests (integration + unit)
 npm test
 
 # Run tests in watch mode
@@ -29,6 +38,12 @@ npm run test:coverage
 
 # Run specific test file
 npm test tests/integration/waitlist.test.mjs
+
+# Run only unit tests
+npm test tests/unit/
+
+# Run only integration tests
+npm test tests/integration/
 ```
 
 ## Test Environment

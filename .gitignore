@@ -4,3 +4,4 @@ data/
 .env.local
 npm-debug.log
 dist/
+generated/

@@ -3,6 +3,10 @@ services:
     environment:
       - NODE_ENV=development
       - CHOKIDAR_USEPOLLING=true
+      - DATABASE_HOST=mysql
+      - DATABASE_USER=seatix_user
+      - DATABASE_PASSWORD=seatix_password
+      - DATABASE_NAME=seatix_waitlist
     volumes:
       - ./:/usr/src/app
       - /usr/src/app/node_modules

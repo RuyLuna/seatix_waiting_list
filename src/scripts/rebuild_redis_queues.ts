@@ -1,26 +1,43 @@
-const db = require('../db/sqlite');
-const { client } = require('../cache/redis');
+import { client } from '../cache/redis.js';
+import { prisma } from '../db/prisma.js';
+
+// Interface for waiting user rows from database
+interface WaitingUser {
+  eventId: string;
+  userId: string;
+  zonesPreferred: string;
+  quantityWanted: number;
+  createdAt: Date;
+}
+
+// Interface for queue data structure
+interface QueueData {
+  [queueKey: string]: string[];
+}
 
 /**
- * Rebuild Redis queues from SQLite on app startup
+ * Rebuild Redis queues from database on app startup
  * This ensures Redis queues are in sync if Redis was restarted or cleared
  */
-async function rebuildRedisQueues() {
+async function rebuildRedisQueues(): Promise<void> {
   try {
     console.log('Checking if Redis queues need rebuilding...');
     
-    const database = db.getDb();
-    
-    // Get all waiting users from SQLite, ordered by created_at (oldest first)
-    const waitingUsers = await new Promise((resolve, reject) => {
-      database.all(
-        `SELECT event_id, user_id, zones_preferred, quantity_wanted, created_at 
-         FROM waitlist 
-         WHERE status = 'waiting' 
-         ORDER BY created_at ASC`,
-        [],
-        (err, rows) => err ? reject(err) : resolve(rows)
-      );
+    // Get all waiting users from database, ordered by created_at (oldest first)
+    const waitingUsers = await prisma.waitlist.findMany({
+      where: {
+        status: 'waiting'
+      },
+      orderBy: {
+        createdAt: 'asc'
+      },
+      select: {
+        eventId: true,
+        userId: true,
+        zonesPreferred: true,
+        quantityWanted: true,
+        createdAt: true
+      }
     });
 
     if (waitingUsers.length === 0) {
@@ -31,28 +48,28 @@ async function rebuildRedisQueues() {
     console.log(`Found ${waitingUsers.length} waiting users in database.`);
 
     // Group by event and zone
-    const queueData = {};
+    const queueData: QueueData = {};
     
     for (const user of waitingUsers) {
-      const zones = JSON.parse(user.zones_preferred);
+      const zones: string[] = JSON.parse(user.zonesPreferred);
       
       for (const zone of zones) {
-        const queueKey = `waitlist:event:${user.event_id}:zone:${zone}`;
+        const queueKey = `waitlist:event:${user.eventId}:zone:${zone}`;
         
         if (!queueData[queueKey]) {
           queueData[queueKey] = [];
         }
         
         // Store as "userId:quantity" format
-        queueData[queueKey].push(`${user.user_id}:${user.quantity_wanted}`);
+        queueData[queueKey].push(`${user.userId}:${user.quantityWanted}`);
       }
     }
 
     // Check each queue and rebuild if empty
-    let rebuiltCount = 0;
+    let rebuiltCount: number = 0;
     
     for (const [queueKey, userEntries] of Object.entries(queueData)) {
-      const currentLength = await client.lLen(queueKey);
+      const currentLength: number = await client.lLen(queueKey);
       
       if (currentLength === 0) {
         // Queue is empty, rebuild it
@@ -69,15 +86,15 @@ async function rebuildRedisQueues() {
     }
 
     if (rebuiltCount > 0) {
-      console.log(`Successfully rebuilt ${rebuiltCount} Redis queues from SQLite`);
+      console.log(`Successfully rebuilt ${rebuiltCount} Redis queues from database`);
     } else {
       console.log('All Redis queues are already populated');
     }
     
   } catch (err) {
-    console.error('Error rebuilding Redis queues:', err);
+    console.error('Error rebuilding Redis queues:', (err as Error).message);
     throw err;
   }
 }
 
-module.exports = { rebuildRedisQueues };
+export { rebuildRedisQueues };

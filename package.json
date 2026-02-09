@@ -1,12 +1,23 @@
 {
   "name": "seatix-waitlist-api",
   "version": "0.1.0",
-  "description": "Waiting list API for a ticketing app (Express + Redis + SQLite)",
-  "main": "src/index.js",
+  "description": "Waiting list API for a ticketing app (Express + Redis + MySQL/Prisma)",
+  "main": "dist/index.js",
+  "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "init-db": "node src/scripts/init_db.js"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon",
+    "init-db": "node dist/scripts/init_db.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:push": "prisma db push",
+    "prisma:test": "tsc test-prisma.ts && node test-prisma.js",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
@@ -15,13 +26,22 @@
     "node": ">=16"
   },
   "dependencies": {
+    "@prisma/adapter-mariadb": "^7.3.0",
+    "@prisma/client": "^7.3.0",
     "bullmq": "^5.67.2",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "redis": "^4.7.1",
-    "sqlite3": "^5.0.2"
+    "sqlite3": "^5.0.2",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.2",
+    "@vitest/coverage-v8": "^1.2.0",
+    "nodemon": "^3.1.11",
+    "prisma": "^7.3.0",
+    "supertest": "^6.3.4",
+    "vitest": "^1.2.0"
   }
 }

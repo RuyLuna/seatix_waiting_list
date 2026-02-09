@@ -1,4 +1,12 @@
-const db = require('../db/sqlite');
+import { prisma } from '../db/prisma.js';
+
+// Interface for test API key structure
+interface TestApiKey {
+  name: string;
+  key_value: string;
+  role: 'user' | 'promoter' | 'admin';
+  event_id: string | null;
+}
 
 /**
  * Seed test API keys for development
@@ -7,11 +15,9 @@ const db = require('../db/sqlite');
  * - promoter: Can use provider endpoints for their events
  * - admin: Full access to all endpoints
  */
-async function seedApiKeys() {
+async function seedApiKeys(): Promise<void> {
   try {
-    const database = db.getDb();
-
-    const testKeys = [
+    const testKeys: TestApiKey[] = [
       {
         name: 'Test User',
         key_value: 'sk_test_user_12345',
@@ -40,52 +46,46 @@ async function seedApiKeys() {
 
     for (const key of testKeys) {
       // Check if key already exists
-      const existing = await new Promise((resolve, reject) => {
-        database.get(
-          'SELECT id FROM api_keys WHERE key_value = ?',
-          [key.key_value],
-          (err, row) => err ? reject(err) : resolve(row)
-        );
+      const existing = await prisma.apiKey.findFirst({
+        where: {
+          keyValue: key.key_value
+        },
+        select: {
+          id: true
+        }
       });
 
       if (!existing) {
-        await new Promise((resolve, reject) => {
-          database.run(
-            'INSERT INTO api_keys (name, key_value, role, event_id, active) VALUES (?, ?, ?, ?, 1)',
-            [key.name, key.key_value, key.role, key.event_id],
-            function(err) {
-              if (err) reject(err);
-              else {
-                console.log(`[Seed] Created API key: ${key.name} (${key.role})`);
-                resolve(this);
-              }
-            }
-          );
+        await prisma.apiKey.create({
+          data: {
+            name: key.name,
+            keyValue: key.key_value,
+            role: key.role,
+            eventId: key.event_id,
+            active: 1
+          }
         });
+        console.log(`[Seed] Created API key: ${key.name} (${key.role})`);
       } else {
         console.log(`[Seed] API key already exists: ${key.name}`);
       }
     }
-
-    console.log('[Seed] API keys seeded successfully');
   } catch (err) {
-    console.error('[Seed] Error seeding API keys:', err);
+    console.error('[Seed] Error seeding API keys:', (err as Error).message);
     throw err;
   }
 }
 
-if (require.main === module) {
-  const sqlite = require('../db/sqlite');
-  sqlite.initDb()
-    .then(() => seedApiKeys())
+if (import.meta.url === `file://${process.argv[1]}`) {
+  seedApiKeys()
     .then(() => {
       console.log('Seeding complete');
       process.exit(0);
     })
-    .catch((err) => {
+    .catch((err: Error) => {
       console.error(err);
       process.exit(1);
     });
 }
 
-module.exports = seedApiKeys;
+export default seedApiKeys;

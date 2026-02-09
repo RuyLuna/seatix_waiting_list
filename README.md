@@ -5,18 +5,56 @@ Implementación de una API de lista de espera para un sistema de venta de boleto
 para solucionar el problema de usuarios que no se enteran cuando hay boletos
 disponibles lo que se traduce en pérdida de ventas.
 
-Hecha en Node.JS con Express, utilizando Redis para agilizar la operación de notificar a los usuarios
-e implementar colas y workers mediante BullMQ (Similar a RabbitMQ pero trabajando directamente con nuestra instancia de Redis) con SQLite como un almacenamiento de datos persistente de fácil implementación, en una implementación real se podría utilizar una solución diferente como PostgreSQL.
+Hecha en Node.JS con Express, Utilizando Redis para agilizar la operación de notificar a los usuarios
+e implementar colas y workers mediante BullMQ (Similar a RabbitMQ pero trabajando directamente con nuestra instancia de Redis)
+con MySQL como un almacenamiento de datos persistente y Prisma ORM para realizar consultas a la base de datos de manera más sencilla y segura.
+
+typescript esta configurado en modo estricto:
+  "strict": true,
+  "allowJs": false,
+  "noImplicitAny": true,
+  "strictNullChecks": true,
+  "strictFunctionTypes": true
+
+### Elección de ORM ###
+Se escogío PrismaORM por dos razones principales, su diseño entrelazado con Typescript,
+su compatibilidad tanto con SQLite y MySQL junto con su proceso de migración sencillo.
+
+Tambíen se tomo en cuenta que Prisma es más moderno y que requería una menor inversión de tiempo de inicio.
+En prisma es más dificil de implementar queries complejas, pero se tomo en cuenta que el proyecto tenia
+muy queries muy simples por lo que esta desventaja de Prisma no nos afecta.
+
+### Pasos de migración, SQLite -> MySQL ###
+Hacer funcionar prisma con SQLite (Minimizando los cambios que tenemos que realizar de golpe)
+Preparar una instancia de MySQL lista para conectarla a Prisma
+Actualizar la fuente de los datos en el archivo schema.prisma
+
+Teniendo los modelos creados:
+Utilizar el comando "prisma migrate dev" para sincronizar nuestro modelo con la base de datos real para que prisma pueda utilizarla
+
+Generar los tipados automaticamente (en base a nuestro modelo) con "prisma generate"
+
+-------
+Si se utiliza prisma db push, se sincronizaran los cambios entre modelo -> base de datos
+sin generar una migración, es más rapido pero se pueden generar cambios destructivos y/o 
+perder datos guardados en la base de datos
+
+Las migraciones tienen la ventaja de que funcionan como un controlador de versiones para la base de datos.
+-------
+
+
 
 
 ### Instrucciones de cómo correr el proyecto ###
+Crear el archivo .env dentro de la carpeta raiz del proyecto (Se puede basar en el archivo .env.example)
 Tener docker instalado
 Utilizar docker compose en la carpeta del repositorio
     docker compose up --build
 para crear el contenedor con los servicios de redis y la api.
-SQLite se almacena automáticamente en un archivo .db dentro de la carpeta data.
+Una instancia de MySQL se levanta automaticamente.
 
-Para probar el proyecto se pueden utilizar herramientas como redis insight para conectarse a la instancia de redis que tenemos en docker y DB Browser for SQLite si queremos ver lo que está ocurriendo en SQLite.
+Para probar el proyecto se pueden utilizar herramientas como redis insight para conectarse a la instancia de redis que tenemos en docker}
+y MySQL Workbench si queremos ver lo que está ocurriendo en MySQL.
 
 La api debería estar disponible en: http://localhost:3000
 
@@ -98,6 +136,10 @@ Los tokens no están guardados permanentemente en SQLite pero si un token expira
 
 ### Siguientes pasos ###
 Si este proyecto fuera real, para completarlo se pudiera realizar lo siguiente:
+
+    Agregar validación de inputs, por ejemplo con Zod, tomando en cuenta que el proyecto
+    ya esta en typescript, para evitar errores causados por datos invalidos de parte del usuario
+
     Una autenticación real, bien implementada con manejo de roles
     Separación de api y workers para un escalado diferente entre servicios
     Funcionalidad de actualizar una entrada en la lista de espera de un usuario

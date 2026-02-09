@@ -1,12 +1,19 @@
-const { Worker } = require('bullmq');
-const db = require('../db/sqlite');
-const { client } = require('../cache/redis');
-const { createOffer } = require('../utils/offers');
+import { Worker, Job } from 'bullmq';
+import { client } from '../cache/redis.js';
+import { createOffer } from '../utils/offers.js';
+import { prisma } from '../db/prisma.js';
+import type { 
+  RedisConnection, 
+  TicketReleaseJobData, 
+  Winner, 
+  ZoneBreakdown, 
+  TicketReleaseResult 
+} from '../types/index.js';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const REDIS_URL: string = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
 // Parse Redis URL to extract connection options
-const parseRedisUrl = (url) => {
+const parseRedisUrl = (url: string): RedisConnection => {
   const urlObj = new URL(url);
   return {
     host: urlObj.hostname,
@@ -14,7 +21,7 @@ const parseRedisUrl = (url) => {
   };
 };
 
-const connection = parseRedisUrl(REDIS_URL);
+const connection: RedisConnection = parseRedisUrl(REDIS_URL);
 
 /**
  * Process ticket release job
@@ -23,24 +30,24 @@ const connection = parseRedisUrl(REDIS_URL);
  * 2. Check each user's quantity_wanted against available tickets
  * 3. Only notify users if available tickets >= quantity_wanted
  * 4. Skip users who need more tickets (keep them in queue)
- * 5. Update SQLite status to 'notified' for selected users
+ * 5. Update database status to 'notified' for selected users
  */
-async function processTicketRelease(job) {
+async function processTicketRelease(job: Job<TicketReleaseJobData>): Promise<TicketReleaseResult> {
   const { event_id, zones, reason } = job.data;
   
   console.log(`[Worker] Processing ticket release for event ${event_id}:`, zones, `(reason: ${reason})`);
   
-  const winners = [];
+  const winners: Winner[] = [];
 
   // Process each zone
   for (const [zone, availableTickets] of Object.entries(zones)) {
-    const queueKey = `waitlist:event:${event_id}:zone:${zone}`;
-    let ticketsRemaining = availableTickets;
+    const queueKey: string = `waitlist:event:${event_id}:zone:${zone}`;
+    let ticketsRemaining: number = availableTickets;
     
     console.log(`[Worker] Processing zone ${zone} with ${availableTickets} available tickets`);
     
     // Get all entries from the queue (format: "userId:quantity")
-    const queue = await client.lRange(queueKey, 0, -1);
+    const queue: string[] = await client.lRange(queueKey, 0, -1);
     
     if (queue.length === 0) {
       console.log(`[Worker] No users in queue for zone ${zone}`);
@@ -49,9 +56,9 @@ async function processTicketRelease(job) {
     
     // Process from the end (oldest users first - FIFO)
     for (let i = queue.length - 1; i >= 0 && ticketsRemaining > 0; i--) {
-      const entry = queue[i];
+      const entry: string = queue[i];
       const [userId, quantityStr] = entry.split(':');
-      const quantityWanted = parseInt(quantityStr, 10);
+      const quantityWanted: number = parseInt(quantityStr, 10);
       
       if (isNaN(quantityWanted)) {
         console.error(`[Worker] Invalid quantity format in entry: ${entry}`);
@@ -61,7 +68,7 @@ async function processTicketRelease(job) {
       // Check if we have enough tickets for this user
       if (ticketsRemaining >= quantityWanted) {
         // User can be notified - remove from queue
-        const removed = await client.lRem(queueKey, 1, entry);
+        const removed: number = await client.lRem(queueKey, 1, entry);
         
         if (removed > 0) {
           // Create an offer token for this user with TTL
@@ -78,17 +85,15 @@ async function processTicketRelease(job) {
           
           ticketsRemaining -= quantityWanted;
 
-          // Update SQLite to mark user as notified
-          const database = db.getDb();
-          await new Promise((resolve, reject) => {
-            database.run(
-              'UPDATE waitlist SET status = ? WHERE event_id = ? AND user_id = ?',
-              ['notified', event_id, userId],
-              function(err) {
-                if (err) reject(err);
-                else resolve(this.changes);
-              }
-            );
+          // Update database to mark user as notified
+          await prisma.waitlist.updateMany({
+            where: {
+              eventId: event_id,
+              userId: userId
+            },
+            data: {
+              status: 'notified'
+            }
           });
 
           console.log(`[Worker] Notified user ${userId} for zone ${zone} (offer token: ${offer.token})`);
@@ -103,15 +108,15 @@ async function processTicketRelease(job) {
     console.log(`[Worker] Zone ${zone} complete: ${availableTickets - ticketsRemaining} tickets allocated, ${ticketsRemaining} remaining`);
   }
 
-  const result = {
+  const result: TicketReleaseResult = {
     success: true,
     event_id: event_id,
     reason: reason,
     total_winners: winners.length,
     total_tickets_allocated: winners.reduce((sum, w) => sum + w.tickets_allocated, 0),
-    zone_breakdown: Object.entries(zones).map(([zone, qty]) => {
-      const zoneWinners = winners.filter(w => w.zone === zone);
-      const ticketsAllocated = zoneWinners.reduce((sum, w) => sum + w.tickets_allocated, 0);
+    zone_breakdown: Object.entries(zones).map(([zone, qty]): ZoneBreakdown => {
+      const zoneWinners: Winner[] = winners.filter(w => w.zone === zone);
+      const ticketsAllocated: number = zoneWinners.reduce((sum, w) => sum + w.tickets_allocated, 0);
       return {
         zone: zone,
         tickets_available: qty,
@@ -129,23 +134,23 @@ async function processTicketRelease(job) {
 }
 
 // Create and start the worker
-let worker;
+let worker: Worker<TicketReleaseJobData, TicketReleaseResult> | undefined;
 
-function startWorker() {
+function startWorker(): Worker<TicketReleaseJobData, TicketReleaseResult> {
   worker = new Worker('ticket-releases', processTicketRelease, {
     connection,
     concurrency: 5, // Process up to 5 jobs concurrently
   });
 
-  worker.on('completed', (job) => {
+  worker.on('completed', (job: Job<TicketReleaseJobData>) => {
     console.log(`[Worker] Job ${job.id} completed successfully`);
   });
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', (job: Job<TicketReleaseJobData> | undefined, err: Error) => {
     console.error(`[Worker] Job ${job?.id} failed:`, err.message);
   });
 
-  worker.on('error', (err) => {
+  worker.on('error', (err: Error) => {
     console.error('[Worker] Worker error:', err);
   });
 
@@ -154,10 +159,11 @@ function startWorker() {
   return worker;
 }
 
-function stopWorker() {
+function stopWorker(): Promise<void> | undefined {
   if (worker) {
     return worker.close();
   }
+  return undefined;
 }
 
-module.exports = { startWorker, stopWorker };
+export { startWorker, stopWorker };

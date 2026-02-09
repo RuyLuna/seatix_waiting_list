@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:22.12-slim
 WORKDIR /usr/src/app
 
 # install sqlite3 CLI tool
@@ -11,5 +11,8 @@ RUN npm install
 # copy source
 COPY . .
 
+# build TypeScript
+RUN npm run build
+
 EXPOSE 3000
-CMD ["node", "src/index.js"]
+CMD ["node", "dist/index.js"]
